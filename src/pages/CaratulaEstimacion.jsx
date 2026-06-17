@@ -14,12 +14,6 @@ function formatFecha(f) {
   return `${d}/${meses[parseInt(m) - 1]}/${y}`
 }
 
-const FIRMANTES = [
-  { cargo: 'Gte. Control de Proyectos', nombre: 'Ing. Arturo García' },
-  { cargo: 'Director de Operaciones', nombre: 'Ing. Jorge Batarse' },
-  { cargo: 'Gte. Ingeniería y Proyectos', nombre: 'Ing. Rubén Treviño' },
-]
-
 export default function CaratulaEstimacion() {
   const { id, estimacionId } = useParams()
   const navigate = useNavigate()
@@ -31,7 +25,7 @@ export default function CaratulaEstimacion() {
     try {
       const { data, error: estError } = await supabase
         .from('estimaciones')
-        .select('*, contratos(*, contratistas(nombre, razon_social), spvs(nombre, razon_social)), periodos(label, fecha_inicio, fecha_fin)')
+        .select('*, contratos(*, contratistas(nombre, razon_social), spvs(nombre, razon_social, gte_control_proyectos, director_operaciones, gte_ingenieria)), periodos(label, fecha_inicio, fecha_fin)')
         .eq('id', estimacionId)
         .maybeSingle()
       if (estError) throw estError
@@ -66,6 +60,12 @@ export default function CaratulaEstimacion() {
   const urlEstimacion = `${window.location.origin}/contrato/${id}/estimacion/${estimacionId}/caratula`
   const tieneEjecucion = estimacion.fecha_inicio_ejecucion && estimacion.fecha_fin_ejecucion
   const nombreContratista = contratista?.razon_social || contratista?.nombre || '—'
+  const nombreSpv = (contrato?.spvs?.razon_social || '').replace(/\s*(S\.\s?A\.|A\.C\.|S\.C\.).*$/i, '').trim() || 'Generación Industrial MTY'
+  const firmantes = [
+    { cargo: 'Gte. Control de Proyectos', nombre: contrato?.spvs?.gte_control_proyectos || '—' },
+    { cargo: 'Director de Operaciones', nombre: contrato?.spvs?.director_operaciones || '—' },
+    { cargo: 'Gte. Ingeniería y Proyectos', nombre: contrato?.spvs?.gte_ingenieria || '—' },
+  ]
 
   return (
     <div>
@@ -90,7 +90,7 @@ export default function CaratulaEstimacion() {
       <div className="bg-white border border-gray-300 rounded-xl max-w-2xl mx-auto p-5 print:border-0 print:rounded-none print:max-w-full print:p-0 print:mx-0">
 
         <div className="text-center border-b-2 border-gray-800 pb-3 mb-4">
-          <h1 className="text-lg font-bold text-gray-900 uppercase tracking-wide">Generación Industrial MTY</h1>
+          <h1 className="text-lg font-bold text-gray-900 uppercase tracking-wide">{nombreSpv}</h1>
           <h2 className="text-base font-semibold text-gray-700 mt-0.5">Carátula de Estimación</h2>
         </div>
 
@@ -118,7 +118,7 @@ export default function CaratulaEstimacion() {
             </div>
             <div>
               <p className="text-xs text-gray-500 uppercase tracking-wide">Cliente</p>
-              <p className="text-sm font-semibold text-gray-900">{contrato?.spv_id} · {contrato?.spvs?.razon_social}</p>
+              <p className="text-sm font-semibold text-gray-900">{(contrato?.spvs?.razon_social || '').replace(/\s*(S\.\s?A\.|A\.C\.|S\.C\.).*$/i, '').trim()}</p>
             </div>
           </div>
           <div className="space-y-2">
@@ -172,7 +172,7 @@ export default function CaratulaEstimacion() {
             <p className="text-white text-sm font-semibold">Firmas de autorización</p>
           </div>
           <div className="grid grid-cols-3 divide-x divide-gray-200">
-            {FIRMANTES.map((f) => (
+            {firmantes.map((f) => (
               <div key={f.cargo} className="p-3 text-center">
                 <div className="h-10 border-b border-gray-300 mb-2"></div>
                 <p className="text-xs text-gray-900 font-semibold">{f.nombre}</p>
@@ -182,11 +182,6 @@ export default function CaratulaEstimacion() {
           </div>
         </div>
 
-        <div className="mt-3 text-center">
-          <p className="text-xs text-gray-400">
-            Powered by Controlia · {new Date().toLocaleDateString('es-MX', { day: '2-digit', month: 'long', year: 'numeric' })}
-          </p>
-        </div>
       </div>
 
       <style>{`
