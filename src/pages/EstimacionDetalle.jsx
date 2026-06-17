@@ -61,7 +61,6 @@ export default function EstimacionDetalle() {
         .select('*, contratos(*, contratistas(nombre), spvs(nombre)), periodos(label, id, contrato_id)')
         .eq('id', estimacionId)
         .maybeSingle()
-      console.log('estimacion detalle query:', est, estError)
       if (estError) throw estError
       if (!est) {
         setError('Estimación no encontrada o sin acceso')

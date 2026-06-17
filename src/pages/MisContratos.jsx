@@ -27,7 +27,6 @@ export default function MisContratos() {
         .select('contratista_id')
         .eq('auth_user_id', user.id)
         .maybeSingle()
-      console.log('usuarios_contratistas acceso:', acceso, accesoError)
       if (accesoError) throw accesoError
 
       if (!acceso) {

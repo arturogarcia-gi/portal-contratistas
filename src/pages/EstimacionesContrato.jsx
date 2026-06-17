@@ -101,7 +101,6 @@ export default function EstimacionesContrato() {
         .select('numero, descripcion, monto_original, pct_anticipo, pct_fondo_garantia, spvs(nombre)')
         .eq('id', id)
         .maybeSingle()
-      console.log('contrato query:', contratoData, contratoError)
       if (contratoError) throw contratoError
       if (!contratoData) {
         setError('Contrato no encontrado o sin acceso')
@@ -114,7 +113,6 @@ export default function EstimacionesContrato() {
         .select('id, label, fecha_inicio, fecha_fin')
         .eq('contrato_id', id)
         .eq('estado', 'abierto')
-      console.log('periodo query:', periodoData, periodoError)
       if (periodoError) throw periodoError
       const periodo = periodoData?.[0] ?? null
 
@@ -124,7 +122,6 @@ export default function EstimacionesContrato() {
         .eq('contrato_id', id)
         .not('estado', 'eq', 'cancelada')
         .order('numero_estimacion', { ascending: true })
-      console.log('estimaciones query:', estData, estError)
       if (estError) throw estError
 
       setContrato(contratoData)
@@ -402,7 +399,6 @@ export default function EstimacionesContrato() {
         }])
         .select()
         .maybeSingle()
-      console.log('estimaciones insert:', est, estError)
       if (estError) throw estError
       if (!est) throw new Error('No se pudo confirmar la creación de la estimación.')
 

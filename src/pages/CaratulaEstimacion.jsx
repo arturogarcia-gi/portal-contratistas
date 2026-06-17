@@ -34,7 +34,6 @@ export default function CaratulaEstimacion() {
         .select('*, contratos(*, contratistas(nombre, razon_social), spvs(nombre)), periodos(label, fecha_inicio, fecha_fin)')
         .eq('id', estimacionId)
         .maybeSingle()
-      console.log('caratula estimacion query:', data, estError)
       if (estError) throw estError
       if (!data) {
         setError('Estimación no encontrada o sin acceso')
