@@ -31,7 +31,7 @@ export default function CaratulaEstimacion() {
     try {
       const { data, error: estError } = await supabase
         .from('estimaciones')
-        .select('*, contratos(*, contratistas(nombre, razon_social), spvs(nombre)), periodos(label, fecha_inicio, fecha_fin)')
+        .select('*, contratos(*, contratistas(nombre, razon_social), spvs(nombre, razon_social)), periodos(label, fecha_inicio, fecha_fin)')
         .eq('id', estimacionId)
         .maybeSingle()
       if (estError) throw estError
@@ -117,8 +117,8 @@ export default function CaratulaEstimacion() {
               <p className="text-sm font-semibold text-gray-900">{nombreContratista}</p>
             </div>
             <div>
-              <p className="text-xs text-gray-500 uppercase tracking-wide">SPV</p>
-              <p className="text-sm font-semibold text-gray-900">{contrato?.spv_id} · {contrato?.spvs?.nombre}</p>
+              <p className="text-xs text-gray-500 uppercase tracking-wide">Cliente</p>
+              <p className="text-sm font-semibold text-gray-900">{contrato?.spv_id} · {contrato?.spvs?.razon_social}</p>
             </div>
           </div>
           <div className="space-y-2">
