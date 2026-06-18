@@ -4,7 +4,7 @@ import * as XLSX from 'xlsx'
 import { supabase } from '../lib/supabase'
 
 const IVA_RATE = 0.16
-const ESTADOS_CUENTAN_SALDO = ['en_revision', 'confirmada', 'correo_enviado', 'pagada']
+const ESTADOS_CUENTAN_SALDO = ['en_revision', 'autorizada', 'correo_enviado', 'pagada']
 
 function formatMXN(n) {
   return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 2 }).format(n || 0)
