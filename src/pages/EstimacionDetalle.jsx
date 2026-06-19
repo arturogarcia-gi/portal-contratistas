@@ -191,6 +191,10 @@ export default function EstimacionDetalle() {
             className="px-4 py-2 text-sm border border-gray-200 rounded-lg hover:bg-gray-50 text-gray-600">
             🖨️ Ver carátula
           </Link>
+          <Link to={`/contrato/${id}/estimacion/${estimacionId}/relacion`}
+            className="px-4 py-2 text-sm border border-gray-200 rounded-lg hover:bg-gray-50 text-gray-600">
+            📋 Estimación Detallada
+          </Link>
           {estimacion.estado === 'borrador' && (
             <button onClick={handleEnviarRevision} disabled={cambiandoEstado}
               className="px-4 py-2 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-40">

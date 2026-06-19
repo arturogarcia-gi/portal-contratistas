@@ -7,6 +7,7 @@ import EstimacionesContrato from './pages/EstimacionesContrato'
 import EstadoCuenta from './pages/EstadoCuenta'
 import CaratulaEstimacion from './pages/CaratulaEstimacion'
 import EstimacionDetalle from './pages/EstimacionDetalle'
+import RelacionEstimacion from './pages/RelacionEstimacion'
 
 function App() {
   const [session, setSession] = useState(null)
@@ -64,6 +65,7 @@ function App() {
             <Route path="/contrato/:id/estimaciones" element={<EstimacionesContrato />} />
             <Route path="/contrato/:id/estado-cuenta" element={<EstadoCuenta />} />
             <Route path="/contrato/:id/estimacion/:estimacionId/caratula" element={<CaratulaEstimacion />} />
+            <Route path="/contrato/:id/estimacion/:estimacionId/relacion" element={<RelacionEstimacion />} />
             <Route path="/contrato/:id/estimacion/:estimacionId" element={<EstimacionDetalle />} />
           </Routes>
         </main>
