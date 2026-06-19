@@ -12,7 +12,8 @@ function formatMXN(n) {
 
 function formatFecha(f) {
   if (!f) return '—'
-  return new Date(f + 'T00:00:00').toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' })
+  const fecha = typeof f === 'string' && f.includes('T') ? new Date(f) : new Date(f + 'T00:00:00')
+  return fecha.toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
 const round2 = (n) => Math.round(n * 100) / 100
@@ -261,11 +262,18 @@ export default function EstimacionesContrato() {
         const wb = XLSX.read(evt.target.result, { type: 'binary' })
         const ws = wb.Sheets[wb.SheetNames[0]]
         const rows = XLSX.utils.sheet_to_json(ws, { defval: '' })
+        const filasSanitizadas = rows.map(fila => {
+          const filaNormalizada = {}
+          Object.keys(fila).forEach(key => {
+            filaNormalizada[key.trim()] = fila[key]
+          })
+          return filaNormalizada
+        })
 
         const errores = []
         const lineas = []
 
-        for (const row of rows) {
+        for (const row of filasSanitizadas) {
           const clave = String(row['Clave'] || '').trim()
           if (!clave) continue
 
@@ -477,7 +485,7 @@ export default function EstimacionesContrato() {
 
       <div className="grid grid-cols-3 gap-4 mb-6">
         <div className="bg-white rounded-xl border border-gray-200 p-4">
-          <p className="text-xs text-gray-500 mb-1">Total estimado</p>
+          <p className="text-xs text-gray-500 mb-1">Total facturado</p>
           <p className="text-xl font-semibold text-gray-900">{formatMXN(totalEstimado)}</p>
         </div>
         <div className="bg-white rounded-xl border border-gray-200 p-4">
