@@ -221,7 +221,7 @@ export default function EstadoCuenta() {
               <tr className="bg-gray-50 border-b border-gray-200">
                 <th className="text-left px-4 py-3 font-medium text-gray-500">Tipo</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-500">No. Factura</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-500 print:hidden">Fecha Fact.</th>
+                <th className="text-left px-4 py-3 font-medium text-gray-500">Fecha Fact.</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-500">Concepto</th>
                 <th className="text-right px-4 py-3 font-medium text-gray-500">Monto Estimado</th>
                 <th className="text-right px-4 py-3 font-medium text-gray-500">Amort. Anticipo</th>
@@ -230,7 +230,7 @@ export default function EstadoCuenta() {
                 <th className="text-right px-4 py-3 font-medium text-gray-500">IVA</th>
                 <th className="text-right px-4 py-3 font-medium text-gray-500">Total</th>
                 <th className="text-center px-4 py-3 font-medium text-gray-500">Fecha Pago</th>
-                <th className="text-center px-4 py-3 font-medium text-gray-500 print:hidden">Estado</th>
+                <th className="text-center px-4 py-3 font-medium text-gray-500">Estado</th>
               </tr>
             </thead>
             <tbody>
@@ -261,7 +261,7 @@ export default function EstadoCuenta() {
                         }`}>{fila.tipo}</span>
                       </td>
                       <td className="px-4 py-2.5 text-gray-700 font-mono">{fila.numero_factura}</td>
-                      <td className="px-4 py-2.5 text-gray-500 print:hidden">{formatFecha(fila.fecha?.split('T')[0])}</td>
+                      <td className="px-4 py-2.5 text-gray-500">{formatFecha(fila.fecha?.split('T')[0])}</td>
                       <td className="px-4 py-2.5 text-gray-700">{fila.referencia}</td>
                       <td className="px-4 py-2.5 text-right text-gray-800 font-medium">
                         {fila.tipo === 'Estimación' ? formatMXN(fila.monto_estimado) : '—'}
@@ -274,7 +274,7 @@ export default function EstadoCuenta() {
                       <td className="px-4 py-2.5 text-center text-gray-600 text-xs">
                         {fila.fecha_pago ? formatFecha(fila.fecha_pago.split('T')[0]) : '—'}
                       </td>
-                      <td className="px-4 py-2.5 text-center print:hidden">
+                      <td className="px-4 py-2.5 text-center">
                         <span className={`px-2 py-0.5 rounded-full text-xs font-medium capitalize ${fila.fecha_pago ? 'bg-blue-50 text-blue-700' : (BADGE[fila.estado] || 'bg-gray-100 text-gray-500')}`}>
                           {fila.fecha_pago ? 'Pagado' : fila.estado}
                         </span>
@@ -287,10 +287,7 @@ export default function EstadoCuenta() {
             {filasFiltradas.length > 0 && (
               <tfoot>
                 <tr className="bg-gray-900 text-white">
-                  <td colSpan={4} className="px-4 py-3 font-semibold text-sm print:hidden">
-                    TOTALES ({filasFiltradas.length} registro{filasFiltradas.length !== 1 ? 's' : ''})
-                  </td>
-                  <td colSpan={3} className="hidden print:table-cell px-4 py-3 font-semibold text-sm">
+                  <td colSpan={4} className="px-4 py-3 font-semibold text-sm">
                     TOTALES ({filasFiltradas.length} registro{filasFiltradas.length !== 1 ? 's' : ''})
                   </td>
                   <td className="px-4 py-3 text-right font-semibold">{formatMXN(totalMonto)}</td>
@@ -299,7 +296,7 @@ export default function EstadoCuenta() {
                   <td className="px-4 py-3 text-right font-semibold">{formatMXN(totalSubtotal)}</td>
                   <td className="px-4 py-3 text-right font-semibold">{formatMXN(totalIVA)}</td>
                   <td className="px-4 py-3 text-right font-bold text-emerald-300 text-sm">{formatMXN(totalNeto)}</td>
-                  <td className="print:hidden" />
+                  <td />
                   <td />
                 </tr>
               </tfoot>
@@ -365,6 +362,7 @@ export default function EstadoCuenta() {
           body { background: white; }
           nav, header { display: none !important; }
           table { font-size: 8px !important; }
+          table .text-xs { font-size: 8px !important; }
           th, td { padding: 3px 4px !important; }
         }
       `}</style>
