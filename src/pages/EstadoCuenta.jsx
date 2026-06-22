@@ -285,7 +285,10 @@ export default function EstadoCuenta() {
             {filasFiltradas.length > 0 && (
               <tfoot>
                 <tr className="bg-gray-900 text-white">
-                  <td colSpan={4} className="px-4 py-3 font-semibold text-sm">
+                  <td colSpan={4} className="px-4 py-3 font-semibold text-sm print:hidden">
+                    TOTALES ({filasFiltradas.length} registro{filasFiltradas.length !== 1 ? 's' : ''})
+                  </td>
+                  <td colSpan={3} className="hidden print:table-cell px-4 py-3 font-semibold text-sm">
                     TOTALES ({filasFiltradas.length} registro{filasFiltradas.length !== 1 ? 's' : ''})
                   </td>
                   <td className="px-4 py-3 text-right font-semibold">{formatMXN(totalMonto)}</td>
