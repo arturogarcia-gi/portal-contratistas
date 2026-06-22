@@ -131,6 +131,8 @@ export default function EstadoCuenta() {
   const totalIVA = totalSubtotal * IVA_PCT
   const totalNeto = totalSubtotal + totalIVA
 
+  const nombreSpv = (contrato.spvs?.razon_social || '').replace(/\s*(S\.\s?A\.|A\.C\.|S\.C\.).*$/i, '').trim() || 'Generación Industrial Monterrey'
+
   const BADGE = {
     autorizada: 'bg-emerald-50 text-emerald-700',
     pagada: 'bg-blue-50 text-blue-700',
@@ -178,14 +180,14 @@ export default function EstadoCuenta() {
         <div className="hidden print:block px-8 pt-6 pb-4 border-b border-gray-200">
           <div className="flex items-start justify-between">
             <div>
-              <p className="text-xs text-gray-400 uppercase tracking-widest mb-1">Generación Industrial Monterrey</p>
+              <p className="text-xs text-gray-400 uppercase tracking-widest mb-1">{nombreSpv}</p>
               <h1 className="text-lg font-bold text-gray-900">Estado de Cuenta</h1>
               <p className="text-sm text-gray-600 mt-0.5">{contrato.numero} · {contrato.descripcion}</p>
             </div>
             <div className="text-right text-xs text-gray-500 space-y-1">
               <p><span className="font-medium">Contratista:</span> {contrato.contratistas?.nombre}</p>
               <p><span className="font-medium">RFC:</span> {contrato.contratistas?.rfc || '—'}</p>
-              <p><span className="font-medium">SPV:</span> {contrato.spvs?.nombre}</p>
+              <p><span className="font-medium">Proyecto:</span> {contrato.spvs?.nombre}</p>
               <p><span className="font-medium">Monto contrato:</span> {formatMXN(contrato.monto_original)}</p>
               <p><span className="font-medium">Fecha impresión:</span> {formatFecha(new Date().toISOString().split('T')[0])}</p>
             </div>
@@ -307,7 +309,6 @@ export default function EstadoCuenta() {
 
         {/* Footer impresión */}
         <div className="hidden print:flex justify-between items-center px-8 py-4 border-t border-gray-200 mt-4">
-          <p className="text-xs text-gray-400">Powered by Controlia</p>
           <p className="text-xs text-gray-400">GI MTY · {contrato.spvs?.nombre}</p>
         </div>
 
