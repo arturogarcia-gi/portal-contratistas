@@ -72,7 +72,7 @@ export default function EstimacionDetalle() {
 
       const { data: cats, error: catsError } = await supabase
         .from('conceptos')
-        .select('id, clave, clave_concepto, descripcion, tipo, jerarquia, orden')
+        .select('id, clave, descripcion, tipo, jerarquia, orden')
         .eq('contrato_id', id)
         .order('orden', { ascending: true })
       if (catsError) throw catsError
@@ -411,7 +411,7 @@ export default function EstimacionDetalle() {
                   const importeAG = conceptosOrdenados
                     .filter(c => c.tipo === 'CO' && c.jerarquia && concepto.jerarquia && c.jerarquia.startsWith(concepto.jerarquia + '.'))
                     .reduce((sum, c) => {
-                      const l = lineaById[c.id] || lineaByClave[c.clave_concepto] || lineaByClave[c.clave]
+                      const l = lineaById[c.id] || lineaByClave[c.clave]
                       return sum + (l?.importe_periodo || 0)
                     }, 0)
                   return (
@@ -426,7 +426,7 @@ export default function EstimacionDetalle() {
                     </tr>
                   )
                 }
-                const linea = lineaById[concepto.id] || lineaByClave[concepto.clave_concepto] || lineaByClave[concepto.clave]
+                const linea = lineaById[concepto.id] || lineaByClave[concepto.clave]
                 if (!linea) return null
                 return (
                   <tr key={concepto.id} className="border-b border-gray-50 hover:bg-gray-50">

@@ -106,7 +106,7 @@ export default function EstadoCuenta() {
       fecha_pago: f.fecha_pago || null,
       path: null,
     })),
-  ]
+  ].sort((a, b) => new Date(a.fecha || '1970-01-01') - new Date(b.fecha || '1970-01-01'))
 
   const estados = ['todos', ...Array.from(new Set(todasFilas.map(f => f.estado)))]
 

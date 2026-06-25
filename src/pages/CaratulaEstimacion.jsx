@@ -55,8 +55,8 @@ export default function CaratulaEstimacion() {
   const amortizacion = estimacion.amortizacion_anticipo
   const fondoGarantia = estimacion.fondo_garantia
   const subtotal = valorEstimacion - amortizacion - fondoGarantia
-  const iva = estimacion.iva
-  const totalNeto = estimacion.total_neto
+  const iva = Math.round(subtotal * 0.16 * 100) / 100
+  const totalNeto = Math.round((subtotal + iva) * 100) / 100
   const urlEstimacion = `${window.location.origin}/contrato/${id}/estimacion/${estimacionId}/caratula`
   const tieneEjecucion = estimacion.fecha_inicio_ejecucion && estimacion.fecha_fin_ejecucion
   const nombreContratista = contratista?.razon_social || contratista?.nombre || '—'
@@ -118,7 +118,7 @@ export default function CaratulaEstimacion() {
             </div>
             <div>
               <p className="text-xs text-gray-500 uppercase tracking-wide">Cliente</p>
-              <p className="text-sm font-semibold text-gray-900">{(contrato?.spvs?.razon_social || '').replace(/\s*(S\.\s?A\.|A\.C\.|S\.C\.).*$/i, '').trim()}</p>
+              <p className="text-sm font-semibold text-gray-900">{contrato?.spvs?.razon_social || '—'}</p>
             </div>
           </div>
           <div className="space-y-2">
@@ -150,7 +150,7 @@ export default function CaratulaEstimacion() {
           <div className="divide-y divide-gray-100">
             {[
               ['Valor de Estimación', formatMXN(valorEstimacion)],
-              [`Amortización anticipo ${contrato?.pct_anticipo}%`, `−${formatMXN(amortizacion)}`],
+              [Math.abs(amortizacion - (estimacion.subtotal * (contrato?.pct_anticipo || 0) / 100)) > 0.01 ? 'Amortización anticipo (especial)' : `Amortización anticipo ${contrato?.pct_anticipo}%`, `−${formatMXN(amortizacion)}`],
               [`Fondo de garantía ${contrato?.pct_fondo_garantia}%`, `−${formatMXN(fondoGarantia)}`],
               ['Subtotal', formatMXN(subtotal)],
               ['IVA 16%', formatMXN(iva)],
