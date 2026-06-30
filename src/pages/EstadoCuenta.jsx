@@ -23,13 +23,14 @@ export default function EstadoCuenta() {
   const [estimaciones, setEstimaciones] = useState([])
   const [anticipos, setAnticipos] = useState([])
   const [fondos, setFondos] = useState([])
+  const [conveniosData, setConveniosData] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [filtroEstado, setFiltroEstado] = useState('todos')
 
   const fetchData = useCallback(async () => {
     try {
-      const [{ data: c, error: cError }, { data: e, error: eError }, { data: a, error: aError }, { data: f, error: fError }] = await Promise.all([
+      const [{ data: c, error: cError }, { data: e, error: eError }, { data: a, error: aError }, { data: f, error: fError }, { data: cv }] = await Promise.all([
         supabase.from('contratos').select('*, contratistas(*), spvs(*)').eq('id', id).single(),
         supabase.from('estimaciones')
           .select('id, numero_estimacion, subtotal, fondo_garantia, amortizacion_anticipo, estado, numero_factura, fecha_factura, fecha_fin_ejecucion, fecha_pago, created_at')
@@ -44,6 +45,7 @@ export default function EstadoCuenta() {
           .select('id, folio, monto, estado, numero_factura, fecha_autorizacion, fecha_pago, created_at')
           .eq('contrato_id', id)
           .order('created_at', { ascending: true }),
+        supabase.from('convenios').select('monto').eq('contrato_id', id).eq('estado', 'autorizado'),
       ])
       if (cError) throw cError
       if (eError) throw eError
@@ -53,6 +55,7 @@ export default function EstadoCuenta() {
       setEstimaciones(e || [])
       setAnticipos(a || [])
       setFondos(f || [])
+      setConveniosData(cv || [])
     } catch (err) {
       setError(err.message)
     } finally {
@@ -131,6 +134,15 @@ export default function EstadoCuenta() {
   const totalIVA = totalSubtotal * IVA_PCT
   const totalNeto = totalSubtotal + totalIVA
 
+  const montoConvenios = conveniosData.reduce((s, c) => s + (c.monto || 0), 0)
+  const montoVigente = (contrato.monto_original || 0) + montoConvenios
+  const totalEstimadoBruto = estimaciones.reduce((s, e) => s + (e.subtotal || 0), 0)
+  const totalPagadoSinIVA = estimaciones
+    .filter(e => e.fecha_pago)
+    .reduce((s, e) => s + (e.subtotal || 0) - (e.amortizacion_anticipo || 0) - (e.fondo_garantia || 0), 0)
+  const saldoPorEstimar = montoVigente - totalEstimadoBruto
+  const saldoPorPagar = montoVigente - totalPagadoSinIVA
+
   const nombreSpv = (contrato.spvs?.razon_social || '').replace(/\s*(S\.\s?A\.|A\.C\.|S\.C\.).*$/i, '').trim() || 'Generación Industrial Monterrey'
 
   const BADGE = {
@@ -188,29 +200,45 @@ export default function EstadoCuenta() {
               <p><span className="font-medium">Contratista:</span> {contrato.contratistas?.nombre}</p>
               <p><span className="font-medium">RFC:</span> {contrato.contratistas?.rfc || '—'}</p>
               <p><span className="font-medium">Proyecto:</span> {contrato.spvs?.nombre}</p>
-              <p><span className="font-medium">Monto contrato:</span> {formatMXN(contrato.monto_original)}</p>
+              <p><span className="font-medium">Contrato vigente:</span> {formatMXN(montoVigente)}</p>
               <p><span className="font-medium">Fecha impresión:</span> {formatFecha(new Date().toISOString().split('T')[0])}</p>
             </div>
           </div>
         </div>
 
         {/* Tarjetas resumen */}
-        <div className="grid grid-cols-4 gap-4 p-5 border-b border-gray-100 print:hidden">
-          <div className="bg-gray-50 rounded-lg p-3">
-            <p className="text-xs text-gray-500 mb-1">Total estimado</p>
-            <p className="text-base font-semibold text-gray-900">{formatMXN(totalMonto)}</p>
+        <div className="p-5 border-b border-gray-100 print:hidden space-y-3">
+          <div className="grid grid-cols-3 gap-3">
+            <div className="bg-gray-50 rounded-lg p-3">
+              <p className="text-xs text-gray-500 mb-1">Contrato original</p>
+              <p className="text-base font-semibold text-gray-900">{formatMXN(contrato.monto_original)}</p>
+            </div>
+            <div className="bg-gray-50 rounded-lg p-3">
+              <p className="text-xs text-gray-500 mb-1">Convenios autorizados</p>
+              <p className="text-base font-semibold text-gray-900">{formatMXN(montoConvenios)}</p>
+            </div>
+            <div className="bg-emerald-50 rounded-lg p-3">
+              <p className="text-xs text-emerald-600 mb-1">Contrato vigente</p>
+              <p className="text-base font-semibold text-emerald-700">{formatMXN(montoVigente)}</p>
+            </div>
           </div>
-          <div className="bg-gray-50 rounded-lg p-3">
-            <p className="text-xs text-gray-500 mb-1">Subtotal neto</p>
-            <p className="text-base font-semibold text-gray-900">{formatMXN(totalSubtotal)}</p>
-          </div>
-          <div className="bg-gray-50 rounded-lg p-3">
-            <p className="text-xs text-gray-500 mb-1">IVA (16%)</p>
-            <p className="text-base font-semibold text-gray-900">{formatMXN(totalIVA)}</p>
-          </div>
-          <div className="bg-emerald-50 rounded-lg p-3">
-            <p className="text-xs text-emerald-600 mb-1">Total con IVA</p>
-            <p className="text-base font-semibold text-emerald-700">{formatMXN(totalNeto)}</p>
+          <div className="grid grid-cols-4 gap-3">
+            <div className="bg-gray-50 rounded-lg p-3">
+              <p className="text-xs text-gray-500 mb-1">Total estimado bruto</p>
+              <p className="text-base font-semibold text-gray-900">{formatMXN(totalEstimadoBruto)}</p>
+            </div>
+            <div className="bg-gray-50 rounded-lg p-3">
+              <p className="text-xs text-gray-500 mb-1">Total pagado sin IVA</p>
+              <p className="text-base font-semibold text-gray-900">{formatMXN(totalPagadoSinIVA)}</p>
+            </div>
+            <div className={`rounded-lg p-3 ${saldoPorEstimar < 0 ? 'bg-red-50' : 'bg-gray-50'}`}>
+              <p className={`text-xs mb-1 ${saldoPorEstimar < 0 ? 'text-red-500' : 'text-gray-500'}`}>Saldo por estimar</p>
+              <p className={`text-base font-semibold ${saldoPorEstimar < 0 ? 'text-red-700' : 'text-gray-900'}`}>{formatMXN(saldoPorEstimar)}</p>
+            </div>
+            <div className={`rounded-lg p-3 ${saldoPorPagar < 0 ? 'bg-red-50' : 'bg-gray-50'}`}>
+              <p className={`text-xs mb-1 ${saldoPorPagar < 0 ? 'text-red-500' : 'text-gray-500'}`}>Saldo por pagar</p>
+              <p className={`text-base font-semibold ${saldoPorPagar < 0 ? 'text-red-700' : 'text-gray-900'}`}>{formatMXN(saldoPorPagar)}</p>
+            </div>
           </div>
         </div>
 
@@ -254,7 +282,7 @@ export default function EstadoCuenta() {
                       className={`border-b border-gray-50 hover:bg-gray-50 transition-colors ${fila.path ? 'cursor-pointer' : ''} ${i % 2 === 0 ? '' : 'bg-gray-50/40'}`}
                     >
                       <td className="px-4 py-2.5">
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium print:text-[8px] ${
                           fila.tipo === 'Estimación' ? 'bg-emerald-50 text-emerald-700' :
                           fila.tipo === 'Anticipo' ? 'bg-blue-50 text-blue-700' :
                           'bg-orange-50 text-orange-700'
@@ -275,7 +303,7 @@ export default function EstadoCuenta() {
                         {fila.fecha_pago ? formatFecha(fila.fecha_pago.split('T')[0]) : '—'}
                       </td>
                       <td className="px-4 py-2.5 text-center">
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium capitalize ${fila.fecha_pago ? 'bg-blue-50 text-blue-700' : (BADGE[fila.estado] || 'bg-gray-100 text-gray-500')}`}>
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium capitalize print:text-[8px] ${fila.fecha_pago ? 'bg-blue-50 text-blue-700' : (BADGE[fila.estado] || 'bg-gray-100 text-gray-500')}`}>
                           {fila.fecha_pago ? 'Pagado' : fila.estado}
                         </span>
                       </td>
@@ -287,7 +315,7 @@ export default function EstadoCuenta() {
             {filasFiltradas.length > 0 && (
               <tfoot>
                 <tr className="bg-gray-900 text-white">
-                  <td colSpan={4} className="px-4 py-3 font-semibold text-sm">
+                  <td colSpan={4} className="px-4 py-3 font-semibold">
                     TOTALES ({filasFiltradas.length} registro{filasFiltradas.length !== 1 ? 's' : ''})
                   </td>
                   <td className="px-4 py-3 text-right font-semibold">{formatMXN(totalMonto)}</td>
@@ -295,7 +323,7 @@ export default function EstadoCuenta() {
                   <td className="px-4 py-3 text-right font-semibold text-red-300">{totalFondo ? `(${formatMXN(totalFondo)})` : '—'}</td>
                   <td className="px-4 py-3 text-right font-semibold">{formatMXN(totalSubtotal)}</td>
                   <td className="px-4 py-3 text-right font-semibold">{formatMXN(totalIVA)}</td>
-                  <td className="px-4 py-3 text-right font-bold text-emerald-300 text-sm">{formatMXN(totalNeto)}</td>
+                  <td className="px-4 py-3 text-right font-bold text-emerald-300">{formatMXN(totalNeto)}</td>
                   <td />
                   <td />
                 </tr>
