@@ -71,6 +71,17 @@ async function fetchAcumuladoMap(contratoId) {
   return acumuladoMap
 }
 
+async function fetchSaldoAnticipoDisponible(contratoId) {
+  const { data: anticipo } = await supabase
+    .from('anticipos').select('monto').eq('contrato_id', contratoId).maybeSingle()
+  const { data: amortAnteriores } = await supabase
+    .from('estimaciones').select('amortizacion_anticipo')
+    .eq('contrato_id', contratoId)
+    .in('estado', ['autorizada', 'correo_enviado', 'pagada'])
+  const amortizadoAnterior = (amortAnteriores || []).reduce((sum, e) => sum + (e.amortizacion_anticipo || 0), 0)
+  return round2((anticipo?.monto || 0) - amortizadoAnterior)
+}
+
 export default function EstimacionesContrato() {
   const { id } = useParams()
   const fileInputRef = useRef(null)
@@ -94,6 +105,8 @@ export default function EstimacionesContrato() {
   const [creadoOk, setCreadoOk] = useState(false)
   const [fechaInicioEjec, setFechaInicioEjec] = useState('')
   const [fechaFinEjec, setFechaFinEjec] = useState('')
+  const [errorFechas, setErrorFechas] = useState(null)
+  const [saldoAnticipoDisponible, setSaldoAnticipoDisponible] = useState(null)
 
   const fetchDatos = useCallback(async () => {
     try {
@@ -161,23 +174,64 @@ export default function EstimacionesContrato() {
     setUploadErrors([])
     setLineasValidadas([])
     setErrorCrear(null)
+    setErrorFechas(null)
     setCreadoOk(false)
     setFechaInicioEjec(periodoAbierto?.fecha_inicio || '')
     setFechaFinEjec(periodoAbierto?.fecha_fin || '')
     setCargandoModal(true)
     try {
-      const [{ data: cp, error: cpError }, mapa] = await Promise.all([
+      const [{ data: cp, error: cpError }, mapa, saldo] = await Promise.all([
         supabase.from('conceptos').select('*').eq('contrato_id', id).eq('tipo', 'CO'),
         fetchAcumuladoMap(id),
+        fetchSaldoAnticipoDisponible(id),
       ])
       if (cpError) throw cpError
       setConceptos(ordenarPorJerarquia(cp || []))
       setAcumuladoMap(mapa)
+      setSaldoAnticipoDisponible(saldo)
     } catch (e) {
       setError(e.message)
     } finally {
       setCargandoModal(false)
     }
+  }
+
+  async function validarFechas() {
+    if (!fechaInicioEjec || !fechaFinEjec) {
+      setErrorFechas('Las fechas de ejecución son obligatorias.')
+      return false
+    }
+    if (fechaFinEjec < fechaInicioEjec) {
+      setErrorFechas('La fecha fin no puede ser anterior a la fecha inicio.')
+      return false
+    }
+
+    const { data: anteriores } = await supabase
+      .from('estimaciones')
+      .select('folio, fecha_inicio_ejecucion, fecha_fin_ejecucion, numero_estimacion')
+      .eq('contrato_id', id)
+      .not('fecha_inicio_ejecucion', 'is', null)
+      .not('estado', 'in', '("cancelada","rechazada")')
+
+    const traslape = anteriores?.find(e => {
+      const ini = e.fecha_inicio_ejecucion
+      const fin = e.fecha_fin_ejecucion
+      return (fechaInicioEjec <= fin && fechaFinEjec >= ini)
+    })
+
+    if (traslape) {
+      setErrorFechas(`Se traslapa con la Estimación #${traslape.numero_estimacion} (${traslape.fecha_inicio_ejecucion} — ${traslape.fecha_fin_ejecucion})`)
+      return false
+    }
+
+    setErrorFechas(null)
+    return true
+  }
+
+  async function handleContinuarPaso1() {
+    const ok = await validarFechas()
+    if (!ok) return
+    setModalPaso(2)
   }
 
   function handleCerrarModal() {
@@ -384,7 +438,10 @@ export default function EstimacionesContrato() {
       }
 
       const fondoGarantia = valorEstimacion * ((contrato?.pct_fondo_garantia || 0) / 100)
-      const amortizacion = valorEstimacion * ((contrato?.pct_anticipo || 0) / 100)
+      const amortizacionSinTope = valorEstimacion * ((contrato?.pct_anticipo || 0) / 100)
+      const amortizacion = saldoAnticipoDisponible !== null
+        ? Math.min(amortizacionSinTope, Math.max(saldoAnticipoDisponible, 0))
+        : amortizacionSinTope
       const subtotalNeto = round2(valorEstimacion - amortizacion - fondoGarantia)
       const iva = round2(subtotalNeto * IVA_RATE)
       const totalNeto = round2(subtotalNeto + iva)
@@ -448,6 +505,14 @@ export default function EstimacionesContrato() {
   const pendiente = totalEstimado - totalPagado
 
   const montoTotalArchivo = lineasValidadas.reduce((sum, l) => sum + (l.importe_periodo || 0), 0)
+  const fondoGarantiaArchivo = montoTotalArchivo * ((contrato?.pct_fondo_garantia || 0) / 100)
+  const amortizacionArchivoSinTope = montoTotalArchivo * ((contrato?.pct_anticipo || 0) / 100)
+  const amortizacionArchivo = saldoAnticipoDisponible !== null
+    ? Math.min(amortizacionArchivoSinTope, Math.max(saldoAnticipoDisponible, 0))
+    : amortizacionArchivoSinTope
+  const subtotalArchivo = round2(montoTotalArchivo - amortizacionArchivo - fondoGarantiaArchivo)
+  const ivaArchivo = round2(subtotalArchivo * IVA_RATE)
+  const totalNetoArchivo = round2(subtotalArchivo + ivaArchivo)
 
   return (
     <div>
@@ -579,17 +644,23 @@ export default function EstimacionesContrato() {
                           <label className="text-sm font-medium text-gray-600 block mb-1">Fecha inicio de ejecución *</label>
                           <input type="date" required
                             value={fechaInicioEjec}
-                            onChange={e => setFechaInicioEjec(e.target.value)}
+                            onChange={e => { setFechaInicioEjec(e.target.value); setErrorFechas(null) }}
                             className="w-full border border-gray-200 rounded-lg px-3 py-2 text-base focus:outline-none focus:border-emerald-400" />
                         </div>
                         <div>
                           <label className="text-sm font-medium text-gray-600 block mb-1">Fecha fin de ejecución *</label>
                           <input type="date" required
                             value={fechaFinEjec}
-                            onChange={e => setFechaFinEjec(e.target.value)}
+                            onChange={e => { setFechaFinEjec(e.target.value); setErrorFechas(null) }}
                             className="w-full border border-gray-200 rounded-lg px-3 py-2 text-base focus:outline-none focus:border-emerald-400" />
                         </div>
                       </div>
+
+                      {errorFechas && (
+                        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-xs text-red-700">
+                          ❌ {errorFechas}
+                        </div>
+                      )}
 
                       <button
                         onClick={handleDescargarPlantilla}
@@ -642,19 +713,51 @@ export default function EstimacionesContrato() {
                           )}
 
                           {uploadErrors.length === 0 && lineasValidadas.length > 0 && (
-                            <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3">
-                              <p className="text-sm font-medium text-emerald-700 mb-2">Archivo válido</p>
-                              <div className="grid grid-cols-2 gap-3">
-                                <div>
-                                  <p className="text-xs text-gray-500">Total de conceptos</p>
-                                  <p className="text-lg font-semibold text-gray-900">{lineasValidadas.length}</p>
-                                </div>
-                                <div>
-                                  <p className="text-xs text-gray-500">Monto total</p>
-                                  <p className="text-lg font-semibold text-gray-900">{formatMXN(montoTotalArchivo)}</p>
+                            <>
+                              <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3">
+                                <p className="text-sm font-medium text-emerald-700 mb-2">Archivo válido</p>
+                                <div className="grid grid-cols-2 gap-3">
+                                  <div>
+                                    <p className="text-xs text-gray-500">Total de conceptos</p>
+                                    <p className="text-lg font-semibold text-gray-900">{lineasValidadas.length}</p>
+                                  </div>
+                                  <div>
+                                    <p className="text-xs text-gray-500">Monto total</p>
+                                    <p className="text-lg font-semibold text-gray-900">{formatMXN(montoTotalArchivo)}</p>
+                                  </div>
                                 </div>
                               </div>
-                            </div>
+
+                              <div className="bg-white border border-gray-200 rounded-lg px-4 py-3">
+                                <p className="text-sm font-medium text-gray-900 mb-2">Resumen financiero</p>
+                                <div className="space-y-1.5">
+                                  <div className="flex justify-between items-center py-1 border-b border-gray-50">
+                                    <span className="text-xs text-gray-500">Valor de Estimación</span>
+                                    <span className="text-sm font-medium text-gray-900">{formatMXN(montoTotalArchivo)}</span>
+                                  </div>
+                                  <div className="flex justify-between items-center py-1 border-b border-gray-50">
+                                    <span className="text-xs text-gray-500">{saldoAnticipoDisponible !== null && saldoAnticipoDisponible <= 0 ? 'Sin saldo de anticipo' : `Amortización anticipo ${contrato?.pct_anticipo}%`}</span>
+                                    <span className="text-sm font-medium text-amber-600">−{formatMXN(amortizacionArchivo)}</span>
+                                  </div>
+                                  <div className="flex justify-between items-center py-1 border-b border-gray-50">
+                                    <span className="text-xs text-gray-500">Fondo garantía {contrato?.pct_fondo_garantia}%</span>
+                                    <span className="text-sm font-medium text-amber-600">−{formatMXN(fondoGarantiaArchivo)}</span>
+                                  </div>
+                                  <div className="flex justify-between items-center py-1 border-b border-gray-200">
+                                    <span className="text-xs font-medium text-gray-700">Subtotal</span>
+                                    <span className="text-sm font-semibold text-gray-900">{formatMXN(subtotalArchivo)}</span>
+                                  </div>
+                                  <div className="flex justify-between items-center py-1 border-b border-gray-50">
+                                    <span className="text-xs text-gray-500">IVA 16%</span>
+                                    <span className="text-sm font-medium text-gray-700">{formatMXN(ivaArchivo)}</span>
+                                  </div>
+                                  <div className="flex justify-between items-center pt-1">
+                                    <span className="text-sm font-semibold text-gray-900">Total neto a pagar</span>
+                                    <span className="text-lg font-bold text-emerald-600">{formatMXN(totalNetoArchivo)}</span>
+                                  </div>
+                                </div>
+                              </div>
+                            </>
                           )}
 
                           {errorCrear && (
@@ -679,7 +782,7 @@ export default function EstimacionesContrato() {
                   </button>
                 )}
                 {modalPaso === 1 && (
-                  <button onClick={() => setModalPaso(2)} disabled={cargandoModal || !fechaInicioEjec || !fechaFinEjec}
+                  <button onClick={handleContinuarPaso1} disabled={cargandoModal || !fechaInicioEjec || !fechaFinEjec}
                     className="px-4 py-2 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-40">
                     Siguiente →
                   </button>
