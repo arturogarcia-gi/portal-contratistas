@@ -32,7 +32,7 @@ const ESTADO_LABELS = {
   autorizada: 'Autorizada',
   rechazada: 'Rechazada',
   rechazada_auditoria: 'Rechazada por auditoría',
-  correo_enviado: 'Correo enviado',
+  correo_enviado: 'Factura solicitada',
   pagada: 'Pagada',
   cancelada: 'Cancelada',
 }

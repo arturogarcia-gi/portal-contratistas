@@ -27,7 +27,7 @@ const ESTADO_COLORS = {
 
 const ESTADO_LABELS = {
   autorizada: 'Autorizada',
-  correo_enviado: 'Correo enviado',
+  correo_enviado: 'Factura solicitada',
   pagada: 'Pagada',
   pendiente: 'Pendiente',
   borrador: 'Borrador',
