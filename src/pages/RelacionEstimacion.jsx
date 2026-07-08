@@ -43,6 +43,7 @@ export default function RelacionEstimacion() {
   const [ocVigente, setOcVigente] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [firmantesConfig, setFirmantesConfig] = useState([])
 
   const fetchDatos = useCallback(async () => {
     try {
@@ -60,7 +61,7 @@ export default function RelacionEstimacion() {
 
       const { data: cats } = await supabase
         .from('conceptos')
-        .select('id, clave, clave_concepto, descripcion, unidad, tipo, jerarquia, orden, cantidad_contratada, precio_unitario')
+        .select('id, clave, descripcion, unidad, tipo, jerarquia, orden, cantidad_contratada, precio_unitario')
         .eq('contrato_id', id)
         .order('orden', { ascending: true })
       setConceptos(cats || [])
@@ -102,6 +103,14 @@ export default function RelacionEstimacion() {
         .limit(1)
         .maybeSingle()
       setOcVigente(oc)
+
+      const { data: fConf } = await supabase
+        .from('contrato_firmantes')
+        .select('puesto')
+        .eq('contrato_id', id)
+        .eq('tipo_documento', 'estimacion')
+        .eq('activo', true)
+      setFirmantesConfig(fConf || [])
     } catch (e) {
       setError(e.message)
     } finally {
@@ -136,7 +145,7 @@ export default function RelacionEstimacion() {
     const cantContratoActual = concepto.cantidad_contratada || 0
     const impContratoActual = cantContratoActual * pu
     const acum = acumAnterior[concepto.id] || { cantidad: 0, importe: 0 }
-    const linea = lineaEstaByConcepto[concepto.id] || lineaEstaByClave[concepto.clave_concepto] || lineaEstaByClave[concepto.clave]
+    const linea = lineaEstaByConcepto[concepto.id] || lineaEstaByClave[concepto.clave]
     const estaCant = linea?.cantidad_periodo || 0
     const estaImp = linea?.importe_periodo || 0
     const nuevoCant = acum.cantidad + estaCant
@@ -278,7 +287,7 @@ export default function RelacionEstimacion() {
                 return (
                   <tr key={concepto.id} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
                     <td className="px-2 py-1 border border-gray-200 font-mono text-gray-600" style={{ paddingLeft: indentPx }}>
-                      {concepto.clave_concepto || concepto.clave}
+                      {concepto.clave}
                     </td>
                     <td className="px-2 py-1 border border-gray-200 text-gray-800">{concepto.descripcion}</td>
                     <td className="px-2 py-1 border border-gray-200 text-gray-600">{concepto.unidad}</td>
@@ -318,32 +327,24 @@ export default function RelacionEstimacion() {
         {/* Firmas */}
         <div className="px-2 pt-6 pb-4">
           {(() => {
-            const firmantes = [
-              {
-                titulo: 'Contratista',
-                nombre: contrato?.firmante_contratista || '',
-                empresa: contratista?.razon_social || contratista?.nombre || '',
-                show: true,
-              },
-              {
-                titulo: 'Project Manager',
-                nombre: contrato?.spvs?.project_manager || '',
-                empresa: contrato?.spvs?.razon_social || '',
-                show: true,
-              },
-              {
-                titulo: 'Supervisión Socio',
-                nombre: contrato?.spvs?.supervision_socio || '',
-                empresa: contrato?.spvs?.razon_social || '',
-                show: contrato?.spvs?.tiene_supervision_socio === true,
-              },
-              {
-                titulo: 'Interventora',
-                nombre: contrato?.spvs?.nombre_interventora || '',
-                empresa: contrato?.spvs?.nombre_interventora || '',
-                show: contrato?.spvs?.tiene_interventora === true,
-              },
-            ].filter(f => f.show)
+            const FIRMANTE_MAP = {
+              contratista:          { titulo: 'Contratista',                 nombre: contrato?.firmante_contratista || '',        empresa: contratista?.razon_social || contratista?.nombre || '' },
+              project_manager:      { titulo: 'Project Manager',             nombre: contrato?.spvs?.project_manager || '',       empresa: contrato?.spvs?.razon_social || '' },
+              supervision:          { titulo: 'Supervisión Socio',           nombre: contrato?.spvs?.supervision_socio || '',     empresa: contrato?.spvs?.razon_social || '' },
+              interventora:         { titulo: 'Interventora',                nombre: contrato?.spvs?.nombre_interventora || '',   empresa: contrato?.spvs?.nombre_interventora || '' },
+              gte_ingenieria:       { titulo: 'Gte. Ingeniería y Proyectos', nombre: contrato?.spvs?.gte_ingenieria || '',        empresa: contrato?.spvs?.razon_social || '' },
+              director_operaciones: { titulo: 'Director de Operaciones',     nombre: contrato?.spvs?.director_operaciones || '',  empresa: contrato?.spvs?.razon_social || '' },
+              gte_control_proyectos:{ titulo: 'Gte. Control de Proyectos',   nombre: contrato?.spvs?.gte_control_proyectos || '', empresa: contrato?.spvs?.razon_social || '' },
+            }
+            const puestosActivos = new Set(firmantesConfig.map(fc => fc.puesto))
+            const firmantes = firmantesConfig.length > 0
+              ? Object.keys(FIRMANTE_MAP).filter(key => puestosActivos.has(key)).map(key => FIRMANTE_MAP[key])
+              : [
+                  { titulo: 'Contratista',      nombre: contrato?.firmante_contratista || '',      empresa: contratista?.razon_social || contratista?.nombre || '', show: true },
+                  { titulo: 'Project Manager',  nombre: contrato?.spvs?.project_manager || '',     empresa: contrato?.spvs?.razon_social || '',                     show: true },
+                  { titulo: 'Supervisión Socio',nombre: contrato?.spvs?.supervision_socio || '',   empresa: contrato?.spvs?.razon_social || '',                     show: contrato?.spvs?.tiene_supervision_socio === true },
+                  { titulo: 'Interventora',     nombre: contrato?.spvs?.nombre_interventora || '', empresa: contrato?.spvs?.nombre_interventora || '',              show: contrato?.spvs?.tiene_interventora === true },
+                ].filter(f => f.show)
             return (
               <div className="grid gap-8 mt-8" style={{ gridTemplateColumns: `repeat(${firmantes.length}, minmax(0, 1fr))` }}>
                 {firmantes.map(f => (
