@@ -2,9 +2,10 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import * as XLSX from 'xlsx'
 import { supabase } from '../lib/supabase'
+import { ESTADO_COLORS as ESTADO_COLORS_ESTIMACION, ESTADO_LABELS as ESTADO_LABELS_ESTIMACION } from '../lib/estadosEstimacion'
 
 const IVA_RATE = 0.16
-const ESTADOS_CUENTAN_SALDO = ['en_revision', 'autorizada', 'correo_enviado', 'pagada']
+const ESTADOS_CUENTAN_SALDO = ['en_revision', 'autorizada', 'correo_enviado', 'con_factura', 'pagada']
 
 function formatMXN(n) {
   return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 2 }).format(n || 0)
@@ -18,20 +19,8 @@ function formatFecha(f) {
 
 const round2 = (n) => Math.round(n * 100) / 100
 
-const ESTADO_COLORS = {
-  autorizada: 'bg-emerald-50 text-emerald-700',
-  correo_enviado: 'bg-blue-50 text-blue-700',
-  pagada: 'bg-green-700 text-white',
-  pendiente: 'bg-amber-50 text-amber-700',
-}
-
-const ESTADO_LABELS = {
-  autorizada: 'Autorizada',
-  correo_enviado: 'Factura solicitada',
-  pagada: 'Pagada',
-  pendiente: 'Pendiente',
-  borrador: 'Borrador',
-}
+const ESTADO_COLORS = { ...ESTADO_COLORS_ESTIMACION, pendiente: 'bg-amber-50 text-amber-700' }
+const ESTADO_LABELS = { ...ESTADO_LABELS_ESTIMACION, pendiente: 'Pendiente' }
 
 function estadoEfectivo(estimacion) {
   return estimacion.fecha_pago ? 'pagada' : estimacion.estado

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { ESTADO_COLORS, ESTADO_LABELS } from '../lib/estadosEstimacion'
 
 function formatMXN(n) {
   return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 2 }).format(n || 0)
@@ -11,30 +12,6 @@ function formatFecha(f) {
   const [y, m, d] = f.split('-')
   const meses = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
   return `${d}/${meses[parseInt(m) - 1]}/${y}`
-}
-
-const ESTADO_COLORS = {
-  borrador: 'bg-gray-50 text-gray-600',
-  en_revision: 'bg-blue-50 text-blue-700',
-  en_correccion: 'bg-amber-100 text-amber-800',
-  autorizada: 'bg-emerald-50 text-emerald-700',
-  rechazada: 'bg-red-50 text-red-700',
-  rechazada_auditoria: 'bg-red-50 text-red-700',
-  correo_enviado: 'bg-purple-50 text-purple-700',
-  pagada: 'bg-green-50 text-green-700',
-  cancelada: 'bg-red-100 text-red-900',
-}
-
-const ESTADO_LABELS = {
-  borrador: 'Borrador',
-  en_revision: 'En revisión',
-  en_correccion: 'En corrección',
-  autorizada: 'Autorizada',
-  rechazada: 'Rechazada',
-  rechazada_auditoria: 'Rechazada por auditoría',
-  correo_enviado: 'Factura solicitada',
-  pagada: 'Pagada',
-  cancelada: 'Cancelada',
 }
 
 export default function EstimacionDetalle() {

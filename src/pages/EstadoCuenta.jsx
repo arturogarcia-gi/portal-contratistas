@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { ESTADO_COLORS as ESTADO_COLORS_ESTIMACION, ESTADO_LABELS as ESTADO_LABELS_ESTIMACION } from '../lib/estadosEstimacion'
 
 function formatMXN(n) {
   return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 }).format(n || 0)
@@ -145,15 +146,8 @@ export default function EstadoCuenta() {
 
   const nombreSpv = (contrato.spvs?.razon_social || '').replace(/\s*(S\.\s?A\.|A\.C\.|S\.C\.).*$/i, '').trim() || 'Generación Industrial Monterrey'
 
-  const BADGE = {
-    autorizada: 'bg-emerald-50 text-emerald-700',
-    pagada: 'bg-blue-50 text-blue-700',
-    enviada: 'bg-amber-50 text-amber-700',
-    revision: 'bg-purple-50 text-purple-700',
-    borrador: 'bg-gray-100 text-gray-500',
-    pendiente: 'bg-yellow-50 text-yellow-700',
-    cancelada: 'bg-red-50 text-red-600',
-  }
+  const BADGE = { ...ESTADO_COLORS_ESTIMACION, pendiente: 'bg-yellow-50 text-yellow-700' }
+  const ESTADO_LABELS = { ...ESTADO_LABELS_ESTIMACION, pendiente: 'Pendiente' }
 
   return (
     <div>
@@ -304,7 +298,7 @@ export default function EstadoCuenta() {
                       </td>
                       <td className="px-4 py-2.5 text-center">
                         <span className={`px-2 py-0.5 rounded-full text-xs font-medium capitalize print:text-[8px] ${fila.fecha_pago ? 'bg-blue-50 text-blue-700' : (BADGE[fila.estado] || 'bg-gray-100 text-gray-500')}`}>
-                          {fila.fecha_pago ? 'Pagado' : fila.estado}
+                          {fila.fecha_pago ? 'Pagado' : (ESTADO_LABELS[fila.estado] || fila.estado)}
                         </span>
                       </td>
                     </tr>
