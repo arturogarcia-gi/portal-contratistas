@@ -146,8 +146,18 @@ export default function EstadoCuenta() {
 
   const nombreSpv = (contrato.spvs?.razon_social || '').replace(/\s*(S\.\s?A\.|A\.C\.|S\.C\.).*$/i, '').trim() || 'Generación Industrial Monterrey'
 
-  const BADGE = { ...ESTADO_COLORS_ESTIMACION, pendiente: 'bg-yellow-50 text-yellow-700' }
-  const ESTADO_LABELS = { ...ESTADO_LABELS_ESTIMACION, pendiente: 'Pendiente' }
+  const BADGE = {
+    ...ESTADO_COLORS_ESTIMACION,
+    pendiente: 'bg-yellow-50 text-yellow-700',
+    autorizado: ESTADO_COLORS_ESTIMACION.autorizada,
+    pagado: ESTADO_COLORS_ESTIMACION.pagada,
+  }
+  const ESTADO_LABELS = {
+    ...ESTADO_LABELS_ESTIMACION,
+    pendiente: 'Pendiente',
+    autorizado: 'Autorizado',
+    pagado: 'Pagado',
+  }
 
   return (
     <div>
