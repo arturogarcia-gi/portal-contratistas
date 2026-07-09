@@ -124,6 +124,7 @@ export default function EstimacionDetalle() {
   const subtotal = valorEstimacion - amortizacion - fondoGarantia
   const iva = estimacion.iva
   const totalNeto = estimacion.total_neto
+  const tasaIva = contrato?.tasa_iva ?? 0.16
   const tieneEjecucion = estimacion.fecha_inicio_ejecucion && estimacion.fecha_fin_ejecucion
 
   return (
@@ -263,7 +264,7 @@ export default function EstimacionDetalle() {
           <p className="text-lg font-semibold text-gray-900">{formatMXN(subtotal)}</p>
         </div>
         <div className="bg-white rounded-xl border border-gray-200 p-4">
-          <p className="text-xs text-gray-500 mb-1">IVA 16%</p>
+          <p className="text-xs text-gray-500 mb-1">IVA {(tasaIva * 100).toFixed(0)}%</p>
           <p className="text-lg font-semibold text-gray-700">{formatMXN(iva)}</p>
         </div>
         <div className="bg-white rounded-xl border border-gray-200 p-4">
@@ -291,7 +292,7 @@ export default function EstimacionDetalle() {
               <span className="text-xs font-semibold text-gray-900">{formatMXN(subtotal)}</span>
             </div>
             <div className="flex justify-between py-1 border-b border-gray-50">
-              <span className="text-xs text-gray-500">IVA 16%</span>
+              <span className="text-xs text-gray-500">IVA {(tasaIva * 100).toFixed(0)}%</span>
               <span className="text-xs font-medium text-gray-700">{formatMXN(iva)}</span>
             </div>
             <div className="flex justify-between pt-2">

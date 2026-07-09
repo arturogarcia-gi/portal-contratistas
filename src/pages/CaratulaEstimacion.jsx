@@ -55,8 +55,9 @@ export default function CaratulaEstimacion() {
   const amortizacion = estimacion.amortizacion_anticipo
   const fondoGarantia = estimacion.fondo_garantia
   const subtotal = valorEstimacion - amortizacion - fondoGarantia
-  const iva = Math.round(subtotal * 0.16 * 100) / 100
-  const totalNeto = Math.round((subtotal + iva) * 100) / 100
+  const iva = estimacion.iva
+  const totalNeto = estimacion.total_neto
+  const tasaIva = contrato?.tasa_iva ?? 0.16
   const urlEstimacion = `${window.location.origin}/contrato/${id}/estimacion/${estimacionId}/caratula`
   const tieneEjecucion = estimacion.fecha_inicio_ejecucion && estimacion.fecha_fin_ejecucion
   const nombreContratista = contratista?.razon_social || contratista?.nombre || '—'
@@ -153,7 +154,7 @@ export default function CaratulaEstimacion() {
               [Math.abs(amortizacion - (estimacion.subtotal * (contrato?.pct_anticipo || 0) / 100)) > 0.01 ? 'Amortización anticipo (especial)' : `Amortización anticipo ${contrato?.pct_anticipo}%`, `−${formatMXN(amortizacion)}`],
               [`Fondo de garantía ${contrato?.pct_fondo_garantia}%`, `−${formatMXN(fondoGarantia)}`],
               ['Subtotal', formatMXN(subtotal)],
-              ['IVA 16%', formatMXN(iva)],
+              [`IVA ${(tasaIva * 100).toFixed(0)}%`, formatMXN(iva)],
             ].map(([label, valor]) => (
               <div key={label} className="flex justify-between px-3 py-1.5">
                 <span className="text-sm text-gray-600">{label}</span>
@@ -174,7 +175,7 @@ export default function CaratulaEstimacion() {
           <div className="grid grid-cols-3 divide-x divide-gray-200">
             {firmantes.map((f) => (
               <div key={f.cargo} className="p-3 text-center">
-                <div className="h-10 border-b border-gray-300 mb-2"></div>
+                <div className="h-20 border-b border-gray-300 mb-2"></div>
                 <p className="text-xs text-gray-900 font-semibold">{f.nombre}</p>
                 <p className="text-xs text-gray-500">{f.cargo}</p>
               </div>

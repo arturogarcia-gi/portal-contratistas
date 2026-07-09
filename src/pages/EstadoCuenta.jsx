@@ -14,8 +14,6 @@ function formatFecha(f) {
   return `${String(d.getDate()).padStart(2,'0')}-${meses[d.getMonth()]}-${String(d.getFullYear()).slice(2)}`
 }
 
-const IVA_PCT = 0.16
-
 export default function EstadoCuenta() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -34,7 +32,7 @@ export default function EstadoCuenta() {
       const [{ data: c, error: cError }, { data: e, error: eError }, { data: a, error: aError }, { data: f, error: fError }, { data: cv }] = await Promise.all([
         supabase.from('contratos').select('*, contratistas(*), spvs(*)').eq('id', id).single(),
         supabase.from('estimaciones')
-          .select('id, numero_estimacion, subtotal, fondo_garantia, amortizacion_anticipo, estado, numero_factura, fecha_factura, fecha_fin_ejecucion, fecha_pago, created_at')
+          .select('id, numero_estimacion, subtotal, iva, fondo_garantia, amortizacion_anticipo, estado, numero_factura, fecha_factura, fecha_fin_ejecucion, fecha_pago, created_at')
           .eq('contrato_id', id)
           .not('estado', 'in', '(cancelada,rechazada,rechazada_auditoria)')
           .order('numero_estimacion', { ascending: true }),
@@ -73,6 +71,8 @@ export default function EstadoCuenta() {
   if (error) return <div className="text-center py-12 text-red-500 text-sm">{error}</div>
   if (!contrato) return <div className="text-center py-12 text-gray-400 text-sm">Contrato no encontrado.</div>
 
+  const tasaIva = contrato.tasa_iva ?? 0.16
+
   const todasFilas = [
     ...estimaciones.map(e => ({
       tipo: 'Estimación',
@@ -81,6 +81,7 @@ export default function EstadoCuenta() {
       monto_estimado: e.subtotal || 0,
       amort_anticipo: e.amortizacion_anticipo || 0,
       retencion_fondo: e.fondo_garantia || 0,
+      iva: e.iva || 0,
       estado: e.estado || 'borrador',
       fecha: e.fecha_factura || e.fecha_fin_ejecucion,
       fecha_pago: e.fecha_pago || null,
@@ -93,6 +94,7 @@ export default function EstadoCuenta() {
       monto_estimado: a.monto || 0,
       amort_anticipo: 0,
       retencion_fondo: 0,
+      iva: (a.monto || 0) * tasaIva,
       estado: a.estado || 'pendiente',
       fecha: a.fecha_autorizacion || a.created_at,
       fecha_pago: a.fecha_pago || null,
@@ -105,6 +107,7 @@ export default function EstadoCuenta() {
       monto_estimado: f.monto || 0,
       amort_anticipo: 0,
       retencion_fondo: 0,
+      iva: (f.monto || 0) * tasaIva,
       estado: f.estado || 'pendiente',
       fecha: f.fecha_autorizacion || f.created_at,
       fecha_pago: f.fecha_pago || null,
@@ -132,7 +135,7 @@ export default function EstadoCuenta() {
       ? s + (f.monto_estimado - f.amort_anticipo - f.retencion_fondo)
       : s + f.monto_estimado
   , 0)
-  const totalIVA = totalSubtotal * IVA_PCT
+  const totalIVA = filasFiltradas.reduce((s, f) => s + f.iva, 0)
   const totalNeto = totalSubtotal + totalIVA
 
   const montoConvenios = conveniosData.reduce((s, c) => s + (c.monto || 0), 0)
@@ -277,7 +280,7 @@ export default function EstadoCuenta() {
                   const subtotal = fila.tipo === 'Estimación'
                     ? fila.monto_estimado - fila.amort_anticipo - fila.retencion_fondo
                     : fila.monto_estimado
-                  const iva = subtotal * IVA_PCT
+                  const iva = fila.iva
                   const total = subtotal + iva
                   return (
                     <tr

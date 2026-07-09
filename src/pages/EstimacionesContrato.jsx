@@ -4,7 +4,6 @@ import * as XLSX from 'xlsx'
 import { supabase } from '../lib/supabase'
 import { ESTADO_COLORS as ESTADO_COLORS_ESTIMACION, ESTADO_LABELS as ESTADO_LABELS_ESTIMACION } from '../lib/estadosEstimacion'
 
-const IVA_RATE = 0.16
 const ESTADOS_CUENTAN_SALDO = ['en_revision', 'autorizada', 'correo_enviado', 'con_factura', 'pagada']
 
 function formatMXN(n) {
@@ -101,7 +100,7 @@ export default function EstimacionesContrato() {
     try {
       const { data: contratoData, error: contratoError } = await supabase
         .from('contratos')
-        .select('numero, descripcion, monto_original, pct_anticipo, pct_fondo_garantia, spvs(nombre)')
+        .select('numero, descripcion, monto_original, pct_anticipo, pct_fondo_garantia, tasa_iva, spvs(nombre)')
         .eq('id', id)
         .maybeSingle()
       if (contratoError) throw contratoError
@@ -432,7 +431,7 @@ export default function EstimacionesContrato() {
         ? Math.min(amortizacionSinTope, Math.max(saldoAnticipoDisponible, 0))
         : amortizacionSinTope
       const subtotalNeto = round2(valorEstimacion - amortizacion - fondoGarantia)
-      const iva = round2(subtotalNeto * IVA_RATE)
+      const iva = round2(subtotalNeto * (contrato?.tasa_iva ?? 0.16))
       const totalNeto = round2(subtotalNeto + iva)
 
       const { data: est, error: estError } = await supabase
@@ -500,7 +499,8 @@ export default function EstimacionesContrato() {
     ? Math.min(amortizacionArchivoSinTope, Math.max(saldoAnticipoDisponible, 0))
     : amortizacionArchivoSinTope
   const subtotalArchivo = round2(montoTotalArchivo - amortizacionArchivo - fondoGarantiaArchivo)
-  const ivaArchivo = round2(subtotalArchivo * IVA_RATE)
+  const tasaIva = contrato?.tasa_iva ?? 0.16
+  const ivaArchivo = round2(subtotalArchivo * tasaIva)
   const totalNetoArchivo = round2(subtotalArchivo + ivaArchivo)
 
   return (
@@ -737,7 +737,7 @@ export default function EstimacionesContrato() {
                                     <span className="text-sm font-semibold text-gray-900">{formatMXN(subtotalArchivo)}</span>
                                   </div>
                                   <div className="flex justify-between items-center py-1 border-b border-gray-50">
-                                    <span className="text-xs text-gray-500">IVA 16%</span>
+                                    <span className="text-xs text-gray-500">IVA {(tasaIva * 100).toFixed(0)}%</span>
                                     <span className="text-sm font-medium text-gray-700">{formatMXN(ivaArchivo)}</span>
                                   </div>
                                   <div className="flex justify-between items-center pt-1">
