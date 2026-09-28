@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { ESTADO_COLORS as ESTADO_COLORS_ESTIMACION, ESTADO_LABELS as ESTADO_LABELS_ESTIMACION } from '../lib/estadosEstimacion'
+import { getPuestosActivos, getNombreFirmante, getLabelPuesto } from '../lib/firmantes'
 
 function formatMXN(n) {
   return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 }).format(n || 0)
@@ -23,13 +24,14 @@ export default function EstadoCuenta() {
   const [anticipos, setAnticipos] = useState([])
   const [fondos, setFondos] = useState([])
   const [conveniosData, setConveniosData] = useState([])
+  const [firmantesConfig, setFirmantesConfig] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [filtroEstado, setFiltroEstado] = useState('todos')
 
   const fetchData = useCallback(async () => {
     try {
-      const [{ data: c, error: cError }, { data: e, error: eError }, { data: a, error: aError }, { data: f, error: fError }, { data: cv }] = await Promise.all([
+      const [{ data: c, error: cError }, { data: e, error: eError }, { data: a, error: aError }, { data: f, error: fError }, { data: cv }, { data: cf, error: cfError }] = await Promise.all([
         supabase.from('contratos').select('*, contratistas(*), spvs(*)').eq('id', id).single(),
         supabase.from('estimaciones')
           .select('id, numero_estimacion, subtotal, iva, fondo_garantia, amortizacion_anticipo, estado, numero_factura, fecha_factura, fecha_fin_ejecucion, fecha_pago, created_at')
@@ -45,6 +47,7 @@ export default function EstadoCuenta() {
           .eq('contrato_id', id)
           .order('created_at', { ascending: true }),
         supabase.from('convenios').select('monto').eq('contrato_id', id).eq('estado', 'autorizado'),
+        supabase.from('contrato_firmantes').select('puesto, activo').eq('contrato_id', id).eq('tipo_documento', 'estado_cuenta'),
       ])
       if (cError) throw cError
       if (eError) throw eError
@@ -55,6 +58,12 @@ export default function EstadoCuenta() {
       setAnticipos(a || [])
       setFondos(f || [])
       setConveniosData(cv || [])
+      if (cfError) {
+        console.error('Error al consultar contrato_firmantes:', cfError)
+        setFirmantesConfig([])
+      } else {
+        setFirmantesConfig(cf || [])
+      }
     } catch (err) {
       setError(err.message)
     } finally {
@@ -139,11 +148,13 @@ export default function EstadoCuenta() {
   const totalNeto = totalSubtotal + totalIVA
 
   const montoConvenios = conveniosData.reduce((s, c) => s + (c.monto || 0), 0)
-  const montoVigente = (contrato.monto_original || 0) + montoConvenios
+  const montoVigente = contrato.monto_vigente || 0
   const totalEstimadoBruto = estimaciones.reduce((s, e) => s + (e.subtotal || 0), 0)
   const totalPagadoSinIVA = estimaciones
     .filter(e => e.fecha_pago)
     .reduce((s, e) => s + (e.subtotal || 0) - (e.amortizacion_anticipo || 0) - (e.fondo_garantia || 0), 0)
+    + anticipos.filter(a => a.estado === 'pagado').reduce((s, a) => s + (a.monto || 0), 0)
+    + fondos.filter(f => f.estado === 'pagado').reduce((s, f) => s + (f.monto || 0), 0)
   const saldoPorEstimar = montoVigente - totalEstimadoBruto
   const saldoPorPagar = montoVigente - totalPagadoSinIVA
 
@@ -344,39 +355,25 @@ export default function EstadoCuenta() {
           <p className="text-xs text-gray-400">GI MTY · {contrato.spvs?.nombre}</p>
         </div>
 
-        {/* Firmas impresión */}
+        {/* Firmas impresión (se pueden apagar por SPV) */}
+        {contrato.spvs?.tiene_firmantes_estado_cuenta !== false && (
         <div className="hidden print:block px-8 pt-6 pb-8">
           {(() => {
-            const firmantes = [
-              {
-                titulo: 'Contratista',
-                nombre: contrato.firmante_contratista || '',
-                empresa: contrato.contratistas?.razon_social || contrato.contratistas?.nombre || '',
-                show: true,
-              },
-              {
-                titulo: 'Project Manager',
-                nombre: contrato.spvs?.project_manager || '',
-                empresa: contrato.spvs?.razon_social || '',
-                show: true,
-              },
-              {
-                titulo: 'Supervisión Socio',
-                nombre: contrato.spvs?.supervision_socio || '',
-                empresa: contrato.spvs?.razon_social || '',
-                show: contrato.spvs?.tiene_supervision_socio === true,
-              },
-              {
-                titulo: 'Interventora',
-                nombre: contrato.spvs?.nombre_interventora || '',
-                empresa: contrato.spvs?.nombre_interventora || '',
-                show: contrato.spvs?.tiene_interventora === true,
-              },
-            ].filter(f => f.show)
+            const empresaDe = puesto =>
+              puesto === 'contratista' ? (contrato.contratistas?.razon_social || contrato.contratistas?.nombre || '')
+              : puesto === 'interventora' ? (contrato.spvs?.nombre_interventora || '')
+              : (contrato.spvs?.razon_social || '')
+            const puestosFirmantes = getPuestosActivos(firmantesConfig, 'estado_cuenta', contrato.spvs)
+            const firmantes = puestosFirmantes.map(puesto => ({
+              puesto,
+              titulo: getLabelPuesto(puesto),
+              nombre: getNombreFirmante(puesto, contrato.spvs, contrato),
+              empresa: empresaDe(puesto),
+            }))
             return (
               <div className="grid gap-8 mt-8" style={{ gridTemplateColumns: `repeat(${firmantes.length}, minmax(0, 1fr))` }}>
                 {firmantes.map(f => (
-                  <div key={f.titulo} className="text-center">
+                  <div key={f.puesto} className="text-center">
                     <div className="border-t border-gray-400 pt-3 mt-12">
                       <p className="text-xs font-semibold text-gray-700">{f.titulo}</p>
                       {f.nombre && <p className="text-xs text-gray-500 mt-0.5">{f.nombre}</p>}
@@ -388,6 +385,7 @@ export default function EstadoCuenta() {
             )
           })()}
         </div>
+        )}
       </div>
 
       <style>{`
