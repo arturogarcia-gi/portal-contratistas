@@ -3,6 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { ESTADO_COLORS as ESTADO_COLORS_ESTIMACION, ESTADO_LABELS as ESTADO_LABELS_ESTIMACION } from '../lib/estadosEstimacion'
 import { getPuestosActivos, getNombreFirmante, getLabelPuesto } from '../lib/firmantes'
+import { nombreArchivo } from '../lib/nombresArchivo'
+import { useTituloDocumento } from '../hooks/useTituloDocumento'
 
 function formatMXN(n) {
   return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 }).format(n || 0)
@@ -72,6 +74,8 @@ export default function EstadoCuenta() {
     const t = setTimeout(() => fetchData(), 0)
     return () => clearTimeout(t)
   }, [fetchData])
+
+  useTituloDocumento(contrato && nombreArchivo({ prefijo: 'EstadoCuenta', contrato: contrato.numero }))
 
   if (loading) return <div className="text-center py-12 text-gray-400 text-sm">Cargando...</div>
   if (error) return <div className="text-center py-12 text-red-500 text-sm">{error}</div>

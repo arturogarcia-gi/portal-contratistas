@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { getPuestosActivos, getNombreFirmante, getLabelPuesto } from '../lib/firmantes'
+import { nombreArchivo } from '../lib/nombresArchivo'
+import { useTituloDocumento } from '../hooks/useTituloDocumento'
 
 function formatMXN(n) {
   return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 2 }).format(n || 0)
@@ -127,6 +129,8 @@ export default function RelacionEstimacion() {
     const t = setTimeout(() => fetchDatos(), 0)
     return () => clearTimeout(t)
   }, [fetchDatos])
+
+  useTituloDocumento(estimacion && nombreArchivo({ prefijo: 'Estimacion', numero: estimacion.numero_estimacion, contrato: estimacion.contratos?.numero }))
 
   if (loading) return <div className="text-center py-12 text-gray-400 text-sm">Cargando relación de estimación...</div>
   if (!estimacion) return <div className="text-center py-12 text-gray-400 text-sm">{error || 'Estimación no encontrada.'}</div>
