@@ -65,7 +65,7 @@ async function fetchSaldoAnticipoDisponible(contratoId) {
   const { data: amortAnteriores } = await supabase
     .from('estimaciones').select('amortizacion_anticipo')
     .eq('contrato_id', contratoId)
-    .in('estado', ['autorizada', 'correo_enviado', 'pagada'])
+    .in('estado', ['autorizada', 'correo_enviado', 'con_factura', 'pagada'])
   const amortizadoAnterior = (amortAnteriores || []).reduce((sum, e) => sum + (e.amortizacion_anticipo || 0), 0)
   return round2((anticipo?.monto || 0) - amortizadoAnterior)
 }
@@ -100,7 +100,7 @@ export default function EstimacionesContrato() {
     try {
       const { data: contratoData, error: contratoError } = await supabase
         .from('contratos')
-        .select('numero, descripcion, monto_original, pct_anticipo, pct_fondo_garantia, tasa_iva, spvs(nombre)')
+        .select('numero, descripcion, monto_original, monto_vigente, pct_anticipo, pct_fondo_garantia, tasa_iva, spvs(nombre)')
         .eq('id', id)
         .maybeSingle()
       if (contratoError) throw contratoError
@@ -417,10 +417,10 @@ export default function EstimacionesContrato() {
         .from('estimaciones')
         .select('subtotal')
         .eq('contrato_id', id)
-        .in('estado', ['borrador', 'en_revision', 'autorizada', 'correo_enviado', 'pagada'])
+        .in('estado', ['borrador', 'en_revision', 'autorizada', 'correo_enviado', 'con_factura', 'pagada'])
       if (prevError) throw prevError
       const sumaPrevia = (prevEsts || []).reduce((sum, e) => sum + (e.subtotal || 0), 0)
-      if (sumaPrevia + valorEstimacion > (contrato?.monto_original || 0)) {
+      if (sumaPrevia + valorEstimacion > (contrato?.monto_vigente ?? contrato?.monto_original ?? 0)) {
         setErrorCrear('El monto supera el saldo disponible del contrato')
         return
       }
