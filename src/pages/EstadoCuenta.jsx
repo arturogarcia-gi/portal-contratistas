@@ -23,7 +23,6 @@ export default function EstadoCuenta() {
   const [estimaciones, setEstimaciones] = useState([])
   const [anticipos, setAnticipos] = useState([])
   const [fondos, setFondos] = useState([])
-  const [conveniosData, setConveniosData] = useState([])
   const [firmantesConfig, setFirmantesConfig] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -31,7 +30,7 @@ export default function EstadoCuenta() {
 
   const fetchData = useCallback(async () => {
     try {
-      const [{ data: c, error: cError }, { data: e, error: eError }, { data: a, error: aError }, { data: f, error: fError }, { data: cv }, { data: cf, error: cfError }] = await Promise.all([
+      const [{ data: c, error: cError }, { data: e, error: eError }, { data: a, error: aError }, { data: f, error: fError }, { data: cf, error: cfError }] = await Promise.all([
         supabase.from('contratos').select('*, contratistas(*), spvs(*)').eq('id', id).single(),
         supabase.from('estimaciones')
           .select('id, numero_estimacion, subtotal, iva, fondo_garantia, amortizacion_anticipo, estado, numero_factura, fecha_factura, fecha_fin_ejecucion, fecha_pago, created_at')
@@ -46,7 +45,6 @@ export default function EstadoCuenta() {
           .select('id, folio, monto, estado, numero_factura, fecha_autorizacion, fecha_pago, created_at')
           .eq('contrato_id', id)
           .order('created_at', { ascending: true }),
-        supabase.from('convenios').select('monto').eq('contrato_id', id).eq('estado', 'autorizado'),
         supabase.from('contrato_firmantes').select('puesto, activo').eq('contrato_id', id).eq('tipo_documento', 'estado_cuenta'),
       ])
       if (cError) throw cError
@@ -57,7 +55,6 @@ export default function EstadoCuenta() {
       setEstimaciones(e || [])
       setAnticipos(a || [])
       setFondos(f || [])
-      setConveniosData(cv || [])
       if (cfError) {
         console.error('Error al consultar contrato_firmantes:', cfError)
         setFirmantesConfig([])
@@ -147,7 +144,6 @@ export default function EstadoCuenta() {
   const totalIVA = filasFiltradas.reduce((s, f) => s + f.iva, 0)
   const totalNeto = totalSubtotal + totalIVA
 
-  const montoConvenios = conveniosData.reduce((s, c) => s + (c.monto || 0), 0)
   const montoVigente = contrato.monto_vigente || 0
   const totalEstimadoBruto = estimaciones.reduce((s, e) => s + (e.subtotal || 0), 0)
   const totalPagadoSinIVA = estimaciones
@@ -233,7 +229,7 @@ export default function EstadoCuenta() {
             </div>
             <div className="bg-gray-50 rounded-lg p-3">
               <p className="text-xs text-gray-500 mb-1">Convenios autorizados</p>
-              <p className="text-base font-semibold text-gray-900">{formatMXN(montoConvenios)}</p>
+              <p className="text-base font-semibold text-gray-900">{formatMXN(contrato.monto_convenios_autorizados)}</p>
             </div>
             <div className="bg-emerald-50 rounded-lg p-3">
               <p className="text-xs text-emerald-600 mb-1">Contrato vigente</p>
