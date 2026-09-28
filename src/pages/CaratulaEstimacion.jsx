@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { QRCodeSVG } from 'qrcode.react'
 import { supabase } from '../lib/supabase'
+import { getPuestosActivos, getNombreFirmante, getLabelPuesto, SPV_FIRMANTE_COLUMNS } from '../lib/firmantes'
 
 function formatMXN(n) {
   return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 2 }).format(n || 0)
@@ -18,28 +19,43 @@ export default function CaratulaEstimacion() {
   const { id, estimacionId } = useParams()
   const navigate = useNavigate()
   const [estimacion, setEstimacion] = useState(null)
+  const [firmantesConfig, setFirmantesConfig] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
   const fetchDatos = useCallback(async () => {
     try {
-      const { data, error: estError } = await supabase
-        .from('estimaciones')
-        .select('*, contratos(*, contratistas(nombre, razon_social), spvs(nombre, razon_social, gte_control_proyectos, director_operaciones, gte_ingenieria)), periodos(label, fecha_inicio, fecha_fin)')
-        .eq('id', estimacionId)
-        .maybeSingle()
+      const [{ data, error: estError }, { data: cf, error: cfError }] = await Promise.all([
+        supabase
+          .from('estimaciones')
+          .select(`*, contratos(*, contratistas(nombre, razon_social), spvs(nombre, razon_social, tiene_qr_caratula, ${SPV_FIRMANTE_COLUMNS.join(', ')})), periodos(label, fecha_inicio, fecha_fin)`)
+          .eq('id', estimacionId)
+          .maybeSingle(),
+        supabase
+          .from('contrato_firmantes')
+          .select('puesto, activo')
+          .eq('contrato_id', id)
+          .eq('tipo_documento', 'caratula'),
+      ])
       if (estError) throw estError
       if (!data) {
         setError('Estimación no encontrada o sin acceso')
         return
       }
       setEstimacion(data)
+
+      if (cfError) {
+        console.error('Error al consultar contrato_firmantes:', cfError)
+        setFirmantesConfig([])
+      } else {
+        setFirmantesConfig(cf || [])
+      }
     } catch (e) {
       setError(e.message)
     } finally {
       setLoading(false)
     }
-  }, [estimacionId])
+  }, [id, estimacionId])
 
   useEffect(() => {
     const t = setTimeout(() => fetchDatos(), 0)
@@ -62,11 +78,12 @@ export default function CaratulaEstimacion() {
   const tieneEjecucion = estimacion.fecha_inicio_ejecucion && estimacion.fecha_fin_ejecucion
   const nombreContratista = contratista?.razon_social || contratista?.nombre || '—'
   const nombreSpv = (contrato?.spvs?.razon_social || '').replace(/\s*(S\.\s?A\.|A\.C\.|S\.C\.).*$/i, '').trim() || 'Generación Industrial MTY'
-  const firmantes = [
-    { cargo: 'Gte. Control de Proyectos', nombre: contrato?.spvs?.gte_control_proyectos || '—' },
-    { cargo: 'Director de Operaciones', nombre: contrato?.spvs?.director_operaciones || '—' },
-    { cargo: 'Gte. Ingeniería y Proyectos', nombre: contrato?.spvs?.gte_ingenieria || '—' },
-  ]
+  const mostrarQr = contrato?.spvs?.tiene_qr_caratula !== false
+  const firmantes = getPuestosActivos(firmantesConfig, 'caratula', contrato?.spvs).map(puesto => ({
+    puesto,
+    cargo: getLabelPuesto(puesto),
+    nombre: getNombreFirmante(puesto, contrato?.spvs, contrato) || '_______________',
+  }))
 
   return (
     <div>
@@ -95,16 +112,18 @@ export default function CaratulaEstimacion() {
           <h2 className="text-base font-semibold text-gray-700 mt-0.5">Carátula de Estimación</h2>
         </div>
 
-        <div className="flex items-center justify-between mb-4 bg-gray-50 rounded-lg p-3">
+        <div className={`flex items-center ${mostrarQr ? 'justify-between' : ''} mb-4 bg-gray-50 rounded-lg p-3`}>
           <div>
             <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Folio de validación</p>
             <p className="text-lg font-mono font-bold text-gray-900">{estimacion.folio}</p>
-            <p className="text-xs text-gray-500 mt-1">Escanea el QR para verificar en la app</p>
+            {mostrarQr && <p className="text-xs text-gray-500 mt-1">Escanea el QR para verificar en la app</p>}
           </div>
-          <div className="flex flex-col items-center">
-            <QRCodeSVG value={urlEstimacion} size={85} level="M" />
-            <p className="text-xs text-gray-400 mt-1">Verificar estimación</p>
-          </div>
+          {mostrarQr && (
+            <div className="flex flex-col items-center">
+              <QRCodeSVG value={urlEstimacion} size={85} level="M" />
+              <p className="text-xs text-gray-400 mt-1">Verificar estimación</p>
+            </div>
+          )}
         </div>
 
         <div className="grid grid-cols-2 gap-3 mb-4">
@@ -172,9 +191,9 @@ export default function CaratulaEstimacion() {
           <div className="bg-gray-800 px-3 py-1.5">
             <p className="text-white text-sm font-semibold">Firmas de autorización</p>
           </div>
-          <div className="grid grid-cols-3 divide-x divide-gray-200">
+          <div className="grid divide-x divide-gray-200" style={{ gridTemplateColumns: `repeat(${firmantes.length}, minmax(0, 1fr))` }}>
             {firmantes.map((f) => (
-              <div key={f.cargo} className="p-3 text-center">
+              <div key={f.puesto} className="p-3 text-center">
                 <div className="h-20 border-b border-gray-300 mb-2"></div>
                 <p className="text-xs text-gray-900 font-semibold">{f.nombre}</p>
                 <p className="text-xs text-gray-500">{f.cargo}</p>
