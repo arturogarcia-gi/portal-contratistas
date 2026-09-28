@@ -32,7 +32,7 @@ function ordenarJerarquia(conceptos) {
   })
 }
 
-const ESTADOS_ACTIVOS = ['en_revision', 'autorizada', 'correo_enviado', 'pagada']
+const ESTADOS_ACTIVOS = ['en_revision', 'autorizada', 'correo_enviado', 'con_factura', 'pagada']
 
 export default function RelacionEstimacion() {
   const { id, estimacionId } = useParams()
