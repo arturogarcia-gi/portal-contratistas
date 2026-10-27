@@ -102,6 +102,7 @@ export default function RelacionEstimacion() {
         .select('numero')
         .eq('contrato_id', id)
         .eq('estado', 'autorizado')
+        .or('tipo.is.null,tipo.neq.anticipo')
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle()
