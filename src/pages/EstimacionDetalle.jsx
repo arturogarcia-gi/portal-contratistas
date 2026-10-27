@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { cargarDatosAmortizacion, calcAmortizacion } from '../lib/amortizacionAnticipo'
 import { ESTADO_COLORS, ESTADO_LABELS } from '../lib/estadosEstimacion'
 
 function formatMXN(n) {
@@ -24,6 +25,7 @@ export default function EstimacionDetalle() {
   const [error, setError] = useState(null)
   const [cambiandoEstado, setCambiandoEstado] = useState(false)
   const [eventoCancelacion, setEventoCancelacion] = useState(null)
+  const [modoAmort, setModoAmort] = useState(null)
 
   const fetchDatos = useCallback(async () => {
     try {
@@ -38,6 +40,14 @@ export default function EstimacionDetalle() {
         return
       }
       setEstimacion(est)
+
+      try {
+        const datos = await cargarDatosAmortizacion(supabase, id, { excluirEstimacionIds: [estimacionId] })
+        setModoAmort(calcAmortizacion({ valorEstimacion: est.subtotal, contrato: est.contratos, ...datos }).modo)
+      } catch (e) {
+        console.error('Error al cargar datos de amortización:', e)
+        setModoAmort(null)
+      }
 
       const { data: lins, error: linsError } = await supabase
         .from('estimacion_lineas')
@@ -125,6 +135,9 @@ export default function EstimacionDetalle() {
   const iva = estimacion.iva
   const totalNeto = estimacion.total_neto
   const tasaIva = contrato?.tasa_iva ?? 0.16
+  const etiquetaAmort = modoAmort === 'proporcional' && valorEstimacion > 0
+    ? `Amortización ${(amortizacion / valorEstimacion * 100).toFixed(1)}%`
+    : `Amortización ${contrato?.pct_anticipo}%`
   const tieneEjecucion = estimacion.fecha_inicio_ejecucion && estimacion.fecha_fin_ejecucion
 
   return (
@@ -279,7 +292,7 @@ export default function EstimacionDetalle() {
           <div className="space-y-2">
             {[
               ['Valor de Estimación', formatMXN(valorEstimacion), 'text-gray-900'],
-              [`Amortización ${contrato?.pct_anticipo}%`, `−${formatMXN(amortizacion)}`, 'text-amber-600'],
+              [etiquetaAmort, `−${formatMXN(amortizacion)}`, 'text-amber-600'],
               [`Fondo garantía ${contrato?.pct_fondo_garantia}%`, `−${formatMXN(fondoGarantia)}`, 'text-amber-600'],
             ].map(([label, value, color]) => (
               <div key={label} className="flex justify-between py-1 border-b border-gray-50">

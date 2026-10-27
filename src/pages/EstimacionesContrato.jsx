@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import * as XLSX from 'xlsx'
 import { supabase } from '../lib/supabase'
+import { cargarDatosAmortizacion, calcAmortizacion } from '../lib/amortizacionAnticipo'
 import { ESTADO_COLORS as ESTADO_COLORS_ESTIMACION, ESTADO_LABELS as ESTADO_LABELS_ESTIMACION } from '../lib/estadosEstimacion'
 
 const ESTADOS_CUENTAN_SALDO = ['en_revision', 'autorizada', 'correo_enviado', 'con_factura', 'pagada']
@@ -59,15 +60,14 @@ async function fetchAcumuladoMap(contratoId) {
   return acumuladoMap
 }
 
-async function fetchSaldoAnticipoDisponible(contratoId) {
-  const { data: anticipo } = await supabase
-    .from('anticipos').select('monto').eq('contrato_id', contratoId).maybeSingle()
-  const { data: amortAnteriores } = await supabase
-    .from('estimaciones').select('amortizacion_anticipo')
-    .eq('contrato_id', contratoId)
-    .in('estado', ['autorizada', 'correo_enviado', 'con_factura', 'pagada'])
-  const amortizadoAnterior = (amortAnteriores || []).reduce((sum, e) => sum + (e.amortizacion_anticipo || 0), 0)
-  return round2((anticipo?.monto || 0) - amortizadoAnterior)
+function etiquetaAmortizacion(calc, valor, contrato) {
+  if (!calc) return ''
+  if (calc.saldoAnticipo <= 0) return 'Sin saldo de anticipo'
+  if (calc.modo === 'proporcional') {
+    const tasaEfectiva = valor > 0 ? calc.amortizacion / valor : calc.tasa
+    return `Amortización anticipo ${(tasaEfectiva * 100).toFixed(1)}%`
+  }
+  return `Amortización anticipo ${contrato?.pct_anticipo}%`
 }
 
 export default function EstimacionesContrato() {
@@ -94,7 +94,7 @@ export default function EstimacionesContrato() {
   const [fechaInicioEjec, setFechaInicioEjec] = useState('')
   const [fechaFinEjec, setFechaFinEjec] = useState('')
   const [errorFechas, setErrorFechas] = useState(null)
-  const [saldoAnticipoDisponible, setSaldoAnticipoDisponible] = useState(null)
+  const [datosAmort, setDatosAmort] = useState(null)
 
   const fetchDatos = useCallback(async () => {
     try {
@@ -157,6 +157,7 @@ export default function EstimacionesContrato() {
       return
     }
 
+    setDatosAmort(null)
     setShowModal(true)
     setModalPaso(1)
     setUploadErrors([])
@@ -168,17 +169,18 @@ export default function EstimacionesContrato() {
     setFechaFinEjec(periodoAbierto?.fecha_fin || '')
     setCargandoModal(true)
     try {
-      const [{ data: cp, error: cpError }, mapa, saldo] = await Promise.all([
+      const [{ data: cp, error: cpError }, mapa, datos] = await Promise.all([
         supabase.from('conceptos').select('*').eq('contrato_id', id).eq('tipo', 'CO'),
         fetchAcumuladoMap(id),
-        fetchSaldoAnticipoDisponible(id),
+        cargarDatosAmortizacion(supabase, id),
       ])
       if (cpError) throw cpError
       setConceptos(ordenarPorJerarquia(cp || []))
       setAcumuladoMap(mapa)
-      setSaldoAnticipoDisponible(saldo)
+      setDatosAmort(datos)
     } catch (e) {
       setError(e.message)
+      setShowModal(false) // sin datos de amortización no se puede continuar
     } finally {
       setCargandoModal(false)
     }
@@ -397,6 +399,11 @@ export default function EstimacionesContrato() {
   async function handleCrearEstimacion() {
     setCreando(true)
     setErrorCrear(null)
+    if (!datosAmort) {
+      setErrorCrear('No se pudo calcular la amortización del anticipo. Cierra el modal y vuelve a intentar.')
+      setCreando(false)
+      return
+    }
     try {
       const { data: estActivas, error: estActivasError } = await supabase
         .from('estimaciones')
@@ -426,10 +433,7 @@ export default function EstimacionesContrato() {
       }
 
       const fondoGarantia = valorEstimacion * ((contrato?.pct_fondo_garantia || 0) / 100)
-      const amortizacionSinTope = valorEstimacion * ((contrato?.pct_anticipo || 0) / 100)
-      const amortizacion = saldoAnticipoDisponible !== null
-        ? Math.min(amortizacionSinTope, Math.max(saldoAnticipoDisponible, 0))
-        : amortizacionSinTope
+      const { amortizacion } = calcAmortizacion({ valorEstimacion, contrato, ...datosAmort })
       const subtotalNeto = round2(valorEstimacion - amortizacion - fondoGarantia)
       const iva = round2(subtotalNeto * (contrato?.tasa_iva ?? 0.16))
       const totalNeto = round2(subtotalNeto + iva)
@@ -494,10 +498,8 @@ export default function EstimacionesContrato() {
 
   const montoTotalArchivo = lineasValidadas.reduce((sum, l) => sum + (l.importe_periodo || 0), 0)
   const fondoGarantiaArchivo = montoTotalArchivo * ((contrato?.pct_fondo_garantia || 0) / 100)
-  const amortizacionArchivoSinTope = montoTotalArchivo * ((contrato?.pct_anticipo || 0) / 100)
-  const amortizacionArchivo = saldoAnticipoDisponible !== null
-    ? Math.min(amortizacionArchivoSinTope, Math.max(saldoAnticipoDisponible, 0))
-    : amortizacionArchivoSinTope
+  const calcArchivo = datosAmort ? calcAmortizacion({ valorEstimacion: montoTotalArchivo, contrato, ...datosAmort }) : null
+  const amortizacionArchivo = calcArchivo?.amortizacion ?? 0
   const subtotalArchivo = round2(montoTotalArchivo - amortizacionArchivo - fondoGarantiaArchivo)
   const tasaIva = contrato?.tasa_iva ?? 0.16
   const ivaArchivo = round2(subtotalArchivo * tasaIva)
@@ -725,7 +727,7 @@ export default function EstimacionesContrato() {
                                     <span className="text-sm font-medium text-gray-900">{formatMXN(montoTotalArchivo)}</span>
                                   </div>
                                   <div className="flex justify-between items-center py-1 border-b border-gray-50">
-                                    <span className="text-xs text-gray-500">{saldoAnticipoDisponible !== null && saldoAnticipoDisponible <= 0 ? 'Sin saldo de anticipo' : `Amortización anticipo ${contrato?.pct_anticipo}%`}</span>
+                                    <span className="text-xs text-gray-500">{etiquetaAmortizacion(calcArchivo, montoTotalArchivo, contrato)}</span>
                                     <span className="text-sm font-medium text-amber-600">−{formatMXN(amortizacionArchivo)}</span>
                                   </div>
                                   <div className="flex justify-between items-center py-1 border-b border-gray-50">

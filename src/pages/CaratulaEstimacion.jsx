@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { QRCodeSVG } from 'qrcode.react'
 import { supabase } from '../lib/supabase'
 import { getPuestosActivos, getNombreFirmante, getLabelPuesto, SPV_FIRMANTE_COLUMNS } from '../lib/firmantes'
+import { cargarDatosAmortizacion, calcAmortizacion } from '../lib/amortizacionAnticipo'
 import { nombreArchivo } from '../lib/nombresArchivo'
 import { useTituloDocumento } from '../hooks/useTituloDocumento'
 
@@ -24,6 +25,7 @@ export default function CaratulaEstimacion() {
   const [firmantesConfig, setFirmantesConfig] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [modoAmort, setModoAmort] = useState(null)
 
   const fetchDatos = useCallback(async () => {
     try {
@@ -45,6 +47,14 @@ export default function CaratulaEstimacion() {
         return
       }
       setEstimacion(data)
+
+      try {
+        const datos = await cargarDatosAmortizacion(supabase, id, { excluirEstimacionIds: [estimacionId] })
+        setModoAmort(calcAmortizacion({ valorEstimacion: data.subtotal, contrato: data.contratos, ...datos }).modo)
+      } catch (e) {
+        console.error('Error al cargar datos de amortización:', e)
+        setModoAmort(null)
+      }
 
       if (cfError) {
         console.error('Error al consultar contrato_firmantes:', cfError)
@@ -78,6 +88,9 @@ export default function CaratulaEstimacion() {
   const iva = estimacion.iva
   const totalNeto = estimacion.total_neto
   const tasaIva = contrato?.tasa_iva ?? 0.16
+  const etiquetaAmort = modoAmort === 'proporcional' && valorEstimacion > 0
+    ? `Amortización anticipo ${(amortizacion / valorEstimacion * 100).toFixed(1)}%`
+    : Math.abs(amortizacion - (estimacion.subtotal * (contrato?.pct_anticipo || 0) / 100)) > 0.01 ? 'Amortización anticipo (especial)' : `Amortización anticipo ${contrato?.pct_anticipo}%`
   const urlEstimacion = `${window.location.origin}/contrato/${id}/estimacion/${estimacionId}/caratula`
   const tieneEjecucion = estimacion.fecha_inicio_ejecucion && estimacion.fecha_fin_ejecucion
   const nombreContratista = contratista?.razon_social || contratista?.nombre || '—'
@@ -174,7 +187,7 @@ export default function CaratulaEstimacion() {
           <div className="divide-y divide-gray-100">
             {[
               ['Valor de Estimación', formatMXN(valorEstimacion)],
-              [Math.abs(amortizacion - (estimacion.subtotal * (contrato?.pct_anticipo || 0) / 100)) > 0.01 ? 'Amortización anticipo (especial)' : `Amortización anticipo ${contrato?.pct_anticipo}%`, `−${formatMXN(amortizacion)}`],
+              [etiquetaAmort, `−${formatMXN(amortizacion)}`],
               [`Fondo de garantía ${contrato?.pct_fondo_garantia}%`, `−${formatMXN(fondoGarantia)}`],
               ['Subtotal', formatMXN(subtotal)],
               [`IVA ${(tasaIva * 100).toFixed(0)}%`, formatMXN(iva)],
