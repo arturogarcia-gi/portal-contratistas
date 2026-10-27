@@ -5,6 +5,29 @@ import { supabase } from '../lib/supabase'
 import { cargarDatosAmortizacion, calcAmortizacion } from '../lib/amortizacionAnticipo'
 import { ESTADO_COLORS as ESTADO_COLORS_ESTIMACION, ESTADO_LABELS as ESTADO_LABELS_ESTIMACION } from '../lib/estadosEstimacion'
 
+const ESTADOS_ESTIMACION_NO_CUENTAN = ['cancelada', 'rechazada', 'rechazada_auditoria']
+const MESES_ES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre']
+
+function hoyLocal() {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+function fechaLargaEs(f) {
+  const [y, m, d] = f.split('-')
+  return `${Number(d)} de ${MESES_ES[Number(m) - 1]} de ${y}`
+}
+
+function mensajeSinPeriodo(contrato, proximoPeriodo) {
+  if (contrato?.fecha_fin && contrato.fecha_fin < hoyLocal()) {
+    return 'Este contrato ya venció y no genera periodos nuevos. Para presentar una estimación, contacta a GI MTY para recibir indicaciones.'
+  }
+  if (proximoPeriodo) {
+    return `No hay un periodo abierto disponible para presentar una estimación. El próximo periodo se abre a partir del ${fechaLargaEs(proximoPeriodo)}.`
+  }
+  return 'No hay un periodo abierto disponible por el momento. Tu periodo se habilita en cuanto GI MTY lo active. Si lo necesitas hoy, contacta a GI MTY.'
+}
+
 const ESTADOS_CUENTAN_SALDO = ['en_revision', 'autorizada', 'correo_enviado', 'con_factura', 'pagada']
 
 function formatMXN(n) {
@@ -75,7 +98,8 @@ export default function EstimacionesContrato() {
   const fileInputRef = useRef(null)
 
   const [contrato, setContrato] = useState(null)
-  const [periodoAbierto, setPeriodoAbierto] = useState(null)
+  const [periodoElegido, setPeriodoElegido] = useState(null)
+  const [proximoPeriodo, setProximoPeriodo] = useState(null)
   const [estimaciones, setEstimaciones] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -100,7 +124,7 @@ export default function EstimacionesContrato() {
     try {
       const { data: contratoData, error: contratoError } = await supabase
         .from('contratos')
-        .select('numero, descripcion, monto_original, monto_vigente, pct_anticipo, pct_fondo_garantia, tasa_iva, spvs(nombre)')
+        .select('numero, descripcion, fecha_fin, monto_original, monto_vigente, pct_anticipo, pct_fondo_garantia, tasa_iva, spvs(nombre)')
         .eq('id', id)
         .maybeSingle()
       if (contratoError) throw contratoError
@@ -115,19 +139,36 @@ export default function EstimacionesContrato() {
         .select('id, label, fecha_inicio, fecha_fin')
         .eq('contrato_id', id)
         .eq('estado', 'abierto')
+        .order('fecha_inicio', { ascending: false, nullsFirst: false })
       if (periodoError) throw periodoError
-      const periodo = periodoData?.[0] ?? null
 
       const { data: estData, error: estError } = await supabase
         .from('estimaciones')
-        .select('id, numero_estimacion, total_neto, estado, numero_factura, fecha_factura, fecha_pago, created_at')
+        .select('id, periodo_id, numero_estimacion, total_neto, estado, numero_factura, fecha_factura, fecha_pago, created_at')
         .eq('contrato_id', id)
         .not('estado', 'eq', 'cancelada')
         .order('numero_estimacion', { ascending: true })
       if (estError) throw estError
 
+      // Candidato: periodo abierto sin estimación vigente; el de fecha_inicio más reciente
+      const ocupados = new Set((estData || [])
+        .filter(e => !ESTADOS_ESTIMACION_NO_CUENTAN.includes(e.estado)).map(e => e.periodo_id))
+      const periodo = (periodoData || []).find(p => !ocupados.has(p.id)) ?? null
+
+      // Solo sin periodo elegible y contrato vigente: el próximo periodo (cualquier estado)
+      let proximo = null
+      if (!periodo && !(contratoData.fecha_fin && contratoData.fecha_fin < hoyLocal())) {
+        const { data: prox, error: proxError } = await supabase
+          .from('periodos').select('fecha_inicio')
+          .eq('contrato_id', id).gt('fecha_inicio', hoyLocal())
+          .order('fecha_inicio', { ascending: true }).limit(1)
+        if (proxError) throw proxError
+        proximo = prox?.[0]?.fecha_inicio ?? null
+      }
+
       setContrato(contratoData)
-      setPeriodoAbierto(periodo)
+      setPeriodoElegido(periodo)
+      setProximoPeriodo(proximo)
       setEstimaciones(estData || [])
     } catch (e) {
       setError(e.message)
@@ -141,19 +182,26 @@ export default function EstimacionesContrato() {
     return () => clearTimeout(t)
   }, [fetchDatos])
 
+  async function periodoTieneEstimacion(periodoId) {
+    const { data, error: e } = await supabase
+      .from('estimaciones').select('id')
+      .eq('periodo_id', periodoId)
+      .not('estado', 'in', '(cancelada,rechazada,rechazada_auditoria)')
+      .limit(1)
+    if (e) throw e
+    return (data || []).length > 0
+  }
+
   async function handleAbrirModal() {
     setError(null)
-    const { data: existentes, error: existentesError } = await supabase
-      .from('estimaciones')
-      .select('id')
-      .eq('periodo_id', periodoAbierto.id)
-      .in('estado', ['borrador', 'en_revision'])
-    if (existentesError) {
-      setError(existentesError.message)
-      return
-    }
-    if (existentes && existentes.length > 0) {
-      setError('Ya tienes una estimación en proceso para este periodo')
+    try {
+      if (await periodoTieneEstimacion(periodoElegido.id)) {
+        setError('Este periodo ya tiene una estimación. Se actualizó la lista.')
+        await fetchDatos()
+        return
+      }
+    } catch (e) {
+      setError(e.message)
       return
     }
 
@@ -165,8 +213,8 @@ export default function EstimacionesContrato() {
     setErrorCrear(null)
     setErrorFechas(null)
     setCreadoOk(false)
-    setFechaInicioEjec(periodoAbierto?.fecha_inicio || '')
-    setFechaFinEjec(periodoAbierto?.fecha_fin || '')
+    setFechaInicioEjec(periodoElegido?.fecha_inicio || '')
+    setFechaFinEjec(periodoElegido?.fecha_fin || '')
     setCargandoModal(true)
     try {
       const [{ data: cp, error: cpError }, mapa, datos] = await Promise.all([
@@ -201,7 +249,7 @@ export default function EstimacionesContrato() {
       .select('folio, fecha_inicio_ejecucion, fecha_fin_ejecucion, numero_estimacion')
       .eq('contrato_id', id)
       .not('fecha_inicio_ejecucion', 'is', null)
-      .not('estado', 'in', '("cancelada","rechazada")')
+      .not('estado', 'in', '("cancelada","rechazada","rechazada_auditoria")')
 
     const traslape = anteriores?.find(e => {
       const ini = e.fecha_inicio_ejecucion
@@ -287,7 +335,7 @@ export default function EstimacionesContrato() {
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `Plantilla_Estimacion_${contrato?.numero}_${periodoAbierto?.label}.xlsx`
+      a.download = `Plantilla_Estimacion_${contrato?.numero}_${periodoElegido?.label}.xlsx`
       document.body.appendChild(a)
       a.click()
       document.body.removeChild(a)
@@ -405,6 +453,12 @@ export default function EstimacionesContrato() {
       return
     }
     try {
+      if (await periodoTieneEstimacion(periodoElegido.id)) {
+        setErrorCrear('Este periodo ya tiene una estimación. Cierra el modal y vuelve a intentar.')
+        await fetchDatos()
+        return
+      }
+
       const { data: estActivas, error: estActivasError } = await supabase
         .from('estimaciones')
         .select('numero_estimacion')
@@ -441,7 +495,7 @@ export default function EstimacionesContrato() {
       const { data: est, error: estError } = await supabase
         .from('estimaciones')
         .insert([{
-          periodo_id: periodoAbierto.id,
+          periodo_id: periodoElegido.id,
           contrato_id: id,
           folio,
           numero_estimacion: numeroEst,
@@ -521,19 +575,24 @@ export default function EstimacionesContrato() {
           <p className="text-sm text-gray-500 mt-1">{contrato?.descripcion} {contrato?.spvs?.nombre && `· ${contrato.spvs.nombre}`}</p>
         </div>
         <div className="flex gap-2">
-          {periodoAbierto && (
-            <button
-              onClick={handleAbrirModal}
-              className="px-4 py-2 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors"
-            >
-              + Nueva estimación
-            </button>
-          )}
+          <button
+            onClick={handleAbrirModal}
+            disabled={!periodoElegido}
+            className="px-4 py-2 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-emerald-600"
+          >
+            + Nueva estimación
+          </button>
           <Link to="/" className="px-4 py-2 text-sm border border-gray-200 rounded-lg hover:bg-gray-50 text-gray-600">
             ← Mis contratos
           </Link>
         </div>
       </div>
+
+      {!periodoElegido && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-lg px-3 py-2 mb-4">
+          {mensajeSinPeriodo(contrato, proximoPeriodo)}
+        </div>
+      )}
 
       {error && (
         <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2 mb-4">{error}</div>
@@ -626,26 +685,31 @@ export default function EstimacionesContrato() {
                   {modalPaso === 1 && (
                     <>
                       <div className="bg-gray-50 border border-gray-100 rounded-lg px-4 py-3">
-                        <p className="text-sm font-medium text-gray-900">Periodo {periodoAbierto?.label}</p>
-                        <p className="text-xs text-gray-500">{formatFecha(periodoAbierto?.fecha_inicio)} — {formatFecha(periodoAbierto?.fecha_fin)}</p>
+                        <p className="text-xs text-gray-500">Periodo de presentación</p>
+                        <p className="text-sm font-medium text-gray-900">{periodoElegido?.label}</p>
+                        <p className="text-xs text-gray-500">{formatFecha(periodoElegido?.fecha_inicio)} — {formatFecha(periodoElegido?.fecha_fin)}</p>
                       </div>
 
                       <div className="grid grid-cols-2 gap-3">
                         <div>
-                          <label className="text-sm font-medium text-gray-600 block mb-1">Fecha inicio de ejecución *</label>
+                          <label className="text-sm font-medium text-gray-600 block mb-1">Inicio de ejecución *</label>
                           <input type="date" required
                             value={fechaInicioEjec}
                             onChange={e => { setFechaInicioEjec(e.target.value); setErrorFechas(null) }}
                             className="w-full border border-gray-200 rounded-lg px-3 py-2 text-base focus:outline-none focus:border-emerald-400" />
                         </div>
                         <div>
-                          <label className="text-sm font-medium text-gray-600 block mb-1">Fecha fin de ejecución *</label>
+                          <label className="text-sm font-medium text-gray-600 block mb-1">Fin de ejecución *</label>
                           <input type="date" required
                             value={fechaFinEjec}
                             onChange={e => { setFechaFinEjec(e.target.value); setErrorFechas(null) }}
                             className="w-full border border-gray-200 rounded-lg px-3 py-2 text-base focus:outline-none focus:border-emerald-400" />
                         </div>
                       </div>
+
+                      <p className="text-xs text-gray-500 -mt-2">
+                        El periodo de presentación lo define GI MTY; las fechas de ejecución son cuando realizaste el trabajo.
+                      </p>
 
                       {errorFechas && (
                         <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-xs text-red-700">
