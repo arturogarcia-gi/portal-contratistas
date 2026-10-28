@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { Fragment, useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { getPuestosActivos, getNombreFirmante, getLabelPuesto } from '../lib/firmantes'
@@ -246,8 +246,14 @@ export default function RelacionEstimacion() {
           </div>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-[10px]">
+        <div className="overflow-x-auto relacion-wrap">
+          <table className="w-full border-collapse text-[10px] relacion-tabla">
+            <colgroup>
+              <col className="c-item" /><col className="c-desc" /><col className="c-un" /><col className="c-pu" />
+              {[0, 1, 2, 3, 4].map(i => (
+                <Fragment key={i}><col className="c-cant" /><col className="c-imp" /></Fragment>
+              ))}
+            </colgroup>
             <thead>
               <tr className="bg-gray-800 text-white">
                 <th rowSpan={2} className="px-2 py-1.5 text-left font-medium border border-gray-300">Item</th>
@@ -372,9 +378,24 @@ export default function RelacionEstimacion() {
 
       <style>{`
         @media print {
+          @page { size: letter landscape; margin: 0.5cm; }
           .print\\:hidden { display: none !important; }
           body { background: white; }
           nav, header { display: none !important; }
+          body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+          .relacion-wrap { overflow: visible !important; }
+          table.relacion-tabla { width: 100% !important; table-layout: fixed; font-size: 7px !important; }
+          table.relacion-tabla th,
+          table.relacion-tabla td { padding: 2px 3px !important; overflow-wrap: anywhere; }
+          table.relacion-tabla col.c-item { width: 5%; }
+          table.relacion-tabla col.c-desc { width: 23%; }
+          table.relacion-tabla col.c-un   { width: 4%; }
+          table.relacion-tabla col.c-pu   { width: 6.5%; }
+          table.relacion-tabla col.c-cant { width: 5%; }
+          table.relacion-tabla col.c-imp  { width: 7.3%; }
+          table.relacion-tabla thead { display: table-header-group; }
+          table.relacion-tabla tfoot { display: table-row-group; }
+          table.relacion-tabla tr { break-inside: avoid; page-break-inside: avoid; }
         }
       `}</style>
     </div>
