@@ -98,7 +98,7 @@ export default function CaratulaEstimacion() {
   const mostrarQr = contrato?.spvs?.tiene_qr_caratula !== false
   const firmantes = getPuestosActivos(firmantesConfig, 'caratula', contrato?.spvs).map(puesto => ({
     puesto,
-    cargo: getLabelPuesto(puesto),
+    cargo: getLabelPuesto(puesto, contrato?.spvs),
     nombre: getNombreFirmante(puesto, contrato?.spvs, contrato) || '_______________',
   }))
 

@@ -1,11 +1,12 @@
 // Única fuente de verdad de los puestos firmantes.
 // key:       valor guardado en contrato_firmantes.puesto (no cambiar)
-// label:     texto a mostrar
+// label:     texto a mostrar por default
 // spvColumn: columna de spvs con el nombre de la persona (null = no vive en spvs)
+// tituloColumn: (opcional) columna de spvs que sobreescribe el label para esa SPV
 export const PUESTOS_FIRMANTES = [
   { key: 'contratista',              label: 'Contratista',                 spvColumn: null },
   { key: 'project_manager',          label: 'Project Manager',             spvColumn: 'project_manager' },
-  { key: 'supervision',              label: 'Supervisión',                 spvColumn: 'supervision_socio' },
+  { key: 'supervision',              label: 'Supervisión Socio',           spvColumn: 'supervision_socio', tituloColumn: 'puesto_supervision_socio' },
   { key: 'interventora',             label: 'Interventora',                spvColumn: 'nombre_interventora' },
   { key: 'gte_ingenieria',           label: 'Gte. Ingeniería',             spvColumn: 'gte_ingenieria' },
   { key: 'subdirector_construccion', label: 'Subdirector de Construcción', spvColumn: 'subdirector_construccion' },
@@ -28,10 +29,13 @@ export const MIN_FIRMANTES = { caratula: 1 }
 export const MAX_FIRMANTES = { caratula: 3 }
 
 // Columnas de spvs que hacen falta para imprimir firmas (para los selects explícitos)
-export const SPV_FIRMANTE_COLUMNS = PUESTOS_FIRMANTES.map(p => p.spvColumn).filter(Boolean)
+export const SPV_FIRMANTE_COLUMNS = PUESTOS_FIRMANTES.flatMap(p => [p.spvColumn, p.tituloColumn]).filter(Boolean)
 
-export function getLabelPuesto(puesto) {
-  return PUESTOS_BY_KEY[puesto]?.label ?? puesto
+// spv es opcional: sin ella (o con título vacío) regresa el label por default
+export function getLabelPuesto(puesto, spv) {
+  const p = PUESTOS_BY_KEY[puesto]
+  const titulo = p?.tituloColumn && spv?.[p.tituloColumn]?.trim()
+  return titulo || p?.label || puesto
 }
 
 // 'contratista' no vive en spvs: se lee de contrato.firmante_contratista

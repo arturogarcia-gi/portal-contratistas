@@ -1,16 +1,14 @@
 import { Fragment, useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import { getPuestosActivos, getNombreFirmante, getLabelPuesto } from '../lib/firmantes'
+import { getPuestosActivos } from '../lib/firmantes'
 import { nombreArchivo } from '../lib/nombresArchivo'
 import { useTituloDocumento } from '../hooks/useTituloDocumento'
+import { construirFilasRelacion, armarFirmas, formatCantidad } from '../lib/relacionEstimacion'
+import { exportarRelacionExcel } from '../lib/exportarRelacionExcel'
 
 function formatMXN(n) {
   return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 2 }).format(n || 0)
-}
-
-function formatCantidad(n) {
-  return Number(n || 0).toLocaleString('es-MX', { maximumFractionDigits: 2 })
 }
 
 function formatFecha(f) {
@@ -18,20 +16,6 @@ function formatFecha(f) {
   const [y, m, d] = f.split('-')
   const meses = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
   return `${d}/${meses[parseInt(m)-1]}/${y}`
-}
-
-function ordenarJerarquia(conceptos) {
-  return [...conceptos].sort((a, b) => {
-    if (!a.jerarquia && !b.jerarquia) return (a.orden || 0) - (b.orden || 0)
-    if (!a.jerarquia) return 1
-    if (!b.jerarquia) return -1
-    const ap = a.jerarquia.split('.').map(Number)
-    const bp = b.jerarquia.split('.').map(Number)
-    for (let i = 0; i < Math.max(ap.length, bp.length); i++) {
-      if ((ap[i] || 0) !== (bp[i] || 0)) return (ap[i] || 0) - (bp[i] || 0)
-    }
-    return 0
-  })
 }
 
 const ESTADOS_ACTIVOS = ['en_revision', 'autorizada', 'correo_enviado', 'con_factura', 'pagada']
@@ -47,6 +31,8 @@ export default function RelacionEstimacion() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [firmantesConfig, setFirmantesConfig] = useState([])
+  const [exportando, setExportando] = useState(false)
+  const [errorExcel, setErrorExcel] = useState(null)
 
   const fetchDatos = useCallback(async () => {
     try {
@@ -71,7 +57,7 @@ export default function RelacionEstimacion() {
 
       const { data: lins } = await supabase
         .from('estimacion_lineas')
-        .select('concepto_id, clave, cantidad_periodo, importe_periodo')
+        .select('concepto_id, clave, cantidad_periodo, importe_periodo, pu_cobrado')
         .eq('estimacion_id', estimacionId)
       setLineasEsta(lins || [])
 
@@ -141,51 +127,33 @@ export default function RelacionEstimacion() {
   const nombreContratista = contratista?.razon_social || contratista?.nombre || '—'
   const nombreSpv = (contrato?.spvs?.razon_social || '').replace(/\s*(S\.\s?A\.|A\.C\.|S\.C\.).*$/i, '').trim() || contrato?.spvs?.nombre || '—'
 
-  const lineaEstaByConcepto = {}
-  const lineaEstaByClave = {}
-  lineasEsta.forEach(l => {
-    if (l.concepto_id) lineaEstaByConcepto[l.concepto_id] = l
-    if (l.clave) lineaEstaByClave[l.clave] = l
+  const { filas, totales } = construirFilasRelacion({ conceptos, acumAnterior, lineasEsta })
+  const firmas = armarFirmas({
+    puestos: getPuestosActivos(firmantesConfig, 'estimacion', contrato?.spvs),
+    spv: contrato?.spvs, contrato, contratista,
   })
 
-  const conceptosOrdenados = ordenarJerarquia(conceptos)
-
-  function calcularFila(concepto) {
-    const pu = concepto.precio_unitario || 0
-    const cantContratoActual = concepto.cantidad_contratada || 0
-    const impContratoActual = cantContratoActual * pu
-    const acum = acumAnterior[concepto.id] || { cantidad: 0, importe: 0 }
-    const linea = lineaEstaByConcepto[concepto.id] || lineaEstaByClave[concepto.clave]
-    const estaCant = linea?.cantidad_periodo || 0
-    const estaImp = linea?.importe_periodo || 0
-    const nuevoCant = acum.cantidad + estaCant
-    const nuevoImp = acum.importe + estaImp
-    const saldoCant = cantContratoActual - nuevoCant
-    const saldoImp = impContratoActual - nuevoImp
-    return {
-      pu, cantContratoActual, impContratoActual,
-      acumCant: acum.cantidad, acumImp: acum.importe,
-      estaCant, estaImp, nuevoCant, nuevoImp, saldoCant, saldoImp,
+  async function handleExportarExcel() {
+    setExportando(true)
+    setErrorExcel(null)
+    try {
+      await exportarRelacionExcel({
+        estimacion, contrato, contratista: nombreContratista,
+        spv: {
+          nombre: nombreSpv,
+          propietario: contrato?.spvs?.razon_social || '—',
+          proyecto: `${contrato?.spvs?.nombre_corto} · ${contrato?.spvs?.nombre_proyecto}`,
+        },
+        periodo: { inicio: estimacion.fecha_inicio_ejecucion, fin: estimacion.fecha_fin_ejecucion },
+        oc: ocVigente?.numero || 'Sin convenios',
+        filas, totales, firmas,
+      })
+    } catch (e) {
+      setErrorExcel('No se pudo exportar a Excel: ' + e.message)
+    } finally {
+      setExportando(false)
     }
   }
-
-  function sumarHijosAG(jerarquiaPadre, campo) {
-    return conceptosOrdenados
-      .filter(c => c.tipo === 'CO' && c.jerarquia && jerarquiaPadre && c.jerarquia.startsWith(jerarquiaPadre + '.'))
-      .reduce((sum, c) => sum + calcularFila(c)[campo], 0)
-  }
-
-  const totales = conceptosOrdenados
-    .filter(c => c.tipo === 'CO' || !c.tipo)
-    .reduce((acc, c) => {
-      const f = calcularFila(c)
-      acc.contratoActual += f.impContratoActual
-      acc.acumAnterior += f.acumImp
-      acc.esta += f.estaImp
-      acc.nuevoAcumulado += f.nuevoImp
-      acc.saldo += f.saldoImp
-      return acc
-    }, { contratoActual: 0, acumAnterior: 0, esta: 0, nuevoAcumulado: 0, saldo: 0 })
 
   return (
     <div>
@@ -196,6 +164,10 @@ export default function RelacionEstimacion() {
         <button onClick={() => window.print()} className="px-4 py-2 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">
           🖨️ Imprimir / Guardar PDF
         </button>
+        <button onClick={handleExportarExcel} disabled={exportando} className="px-4 py-2 text-sm border border-emerald-600 text-emerald-700 rounded-lg hover:bg-emerald-50 disabled:opacity-50">
+          {exportando ? 'Generando...' : '📊 Exportar Excel'}
+        </button>
+        {errorExcel && <span className="self-center text-sm text-red-600">{errorExcel}</span>}
       </div>
 
       {error && (
@@ -273,55 +245,49 @@ export default function RelacionEstimacion() {
               </tr>
             </thead>
             <tbody>
-              {conceptosOrdenados.map((concepto, idx) => {
-                const nivel = (concepto.jerarquia?.match(/\./g) || []).length
+              {filas.map((fila, idx) => {
+                const nivel = (fila.jerarquia?.match(/\./g) || []).length
                 const indentPx = 8 + nivel * 10
 
-                if (concepto.tipo === 'AG') {
-                  const impContratoActual = sumarHijosAG(concepto.jerarquia, 'impContratoActual')
-                  const impAcumAnterior = sumarHijosAG(concepto.jerarquia, 'acumImp')
-                  const impEsta = sumarHijosAG(concepto.jerarquia, 'estaImp')
-                  const impNuevoAcumulado = sumarHijosAG(concepto.jerarquia, 'nuevoImp')
-                  const impSaldo = sumarHijosAG(concepto.jerarquia, 'saldoImp')
+                if (fila.tipo === 'AG') {
                   return (
-                    <tr key={concepto.id} className="bg-gray-200/60">
-                      <td className="px-2 py-1 border border-gray-200 font-mono font-bold" style={{ paddingLeft: indentPx }}>{concepto.jerarquia}</td>
-                      <td className="px-2 py-1 border border-gray-200 font-bold">{concepto.descripcion}</td>
+                    <tr key={fila.id} className="bg-gray-200/60">
+                      <td className="px-2 py-1 border border-gray-200 font-mono font-bold" style={{ paddingLeft: indentPx }}>{fila.jerarquia}</td>
+                      <td className="px-2 py-1 border border-gray-200 font-bold">{fila.descripcion}</td>
                       <td className="px-2 py-1 border border-gray-200 text-gray-400">—</td>
                       <td className="px-2 py-1 border border-gray-200 text-right text-gray-400">—</td>
                       <td className="px-2 py-1 border border-gray-200 text-right text-gray-400">—</td>
-                      <td className="px-2 py-1 border border-gray-200 text-right font-semibold">{formatMXN(impContratoActual)}</td>
+                      <td className="px-2 py-1 border border-gray-200 text-right font-semibold">{formatMXN(fila.contratoImp)}</td>
                       <td className="px-2 py-1 border border-gray-200 text-right text-gray-400">—</td>
-                      <td className="px-2 py-1 border border-gray-200 text-right font-semibold">{formatMXN(impAcumAnterior)}</td>
+                      <td className="px-2 py-1 border border-gray-200 text-right font-semibold">{formatMXN(fila.acumImp)}</td>
                       <td className="px-2 py-1 border border-gray-200 text-right text-gray-400">—</td>
-                      <td className="px-2 py-1 border border-gray-200 text-right font-semibold">{formatMXN(impEsta)}</td>
+                      <td className="px-2 py-1 border border-gray-200 text-right font-semibold">{formatMXN(fila.estaImp)}</td>
                       <td className="px-2 py-1 border border-gray-200 text-right text-gray-400">—</td>
-                      <td className="px-2 py-1 border border-gray-200 text-right font-semibold">{formatMXN(impNuevoAcumulado)}</td>
+                      <td className="px-2 py-1 border border-gray-200 text-right font-semibold">{formatMXN(fila.nuevoImp)}</td>
                       <td className="px-2 py-1 border border-gray-200 text-right text-gray-400">—</td>
-                      <td className="px-2 py-1 border border-gray-200 text-right font-semibold">{formatMXN(impSaldo)}</td>
+                      <td className="px-2 py-1 border border-gray-200 text-right font-semibold">{formatMXN(fila.saldoImp)}</td>
                     </tr>
                   )
                 }
 
-                const f = calcularFila(concepto)
                 return (
-                  <tr key={concepto.id} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                  <tr key={fila.id} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
                     <td className="px-2 py-1 border border-gray-200 font-mono text-gray-600" style={{ paddingLeft: indentPx }}>
-                      {concepto.clave}
+                      {fila.clave}
                     </td>
-                    <td className="px-2 py-1 border border-gray-200 text-gray-800">{concepto.descripcion}</td>
-                    <td className="px-2 py-1 border border-gray-200 text-gray-600">{concepto.unidad}</td>
-                    <td className="px-2 py-1 border border-gray-200 text-right text-gray-700">{formatMXN(f.pu)}</td>
-                    <td className="px-2 py-1 border border-gray-200 text-right text-gray-700">{formatCantidad(f.cantContratoActual)}</td>
-                    <td className="px-2 py-1 border border-gray-200 text-right text-gray-900">{formatMXN(f.impContratoActual)}</td>
-                    <td className="px-2 py-1 border border-gray-200 text-right text-gray-700">{formatCantidad(f.acumCant)}</td>
-                    <td className="px-2 py-1 border border-gray-200 text-right text-gray-900">{formatMXN(f.acumImp)}</td>
-                    <td className="px-2 py-1 border border-gray-200 text-right text-gray-700">{formatCantidad(f.estaCant)}</td>
-                    <td className="px-2 py-1 border border-gray-200 text-right font-medium text-gray-900">{formatMXN(f.estaImp)}</td>
-                    <td className="px-2 py-1 border border-gray-200 text-right text-gray-700">{formatCantidad(f.nuevoCant)}</td>
-                    <td className="px-2 py-1 border border-gray-200 text-right text-gray-900">{formatMXN(f.nuevoImp)}</td>
-                    <td className={`px-2 py-1 border border-gray-200 text-right ${f.saldoCant < 0 ? 'text-red-600' : 'text-gray-700'}`}>{formatCantidad(f.saldoCant)}</td>
-                    <td className={`px-2 py-1 border border-gray-200 text-right font-medium ${f.saldoImp < 0 ? 'text-red-600' : 'text-gray-900'}`}>{formatMXN(f.saldoImp)}</td>
+                    <td className="px-2 py-1 border border-gray-200 text-gray-800">{fila.descripcion}</td>
+                    <td className="px-2 py-1 border border-gray-200 text-gray-600">{fila.unidad}</td>
+                    <td className="px-2 py-1 border border-gray-200 text-right text-gray-700">{formatMXN(fila.pu)}</td>
+                    <td className="px-2 py-1 border border-gray-200 text-right text-gray-700">{formatCantidad(fila.contratoCant)}</td>
+                    <td className="px-2 py-1 border border-gray-200 text-right text-gray-900">{formatMXN(fila.contratoImp)}</td>
+                    <td className="px-2 py-1 border border-gray-200 text-right text-gray-700">{formatCantidad(fila.acumCant)}</td>
+                    <td className="px-2 py-1 border border-gray-200 text-right text-gray-900">{formatMXN(fila.acumImp)}</td>
+                    <td className="px-2 py-1 border border-gray-200 text-right text-gray-700">{formatCantidad(fila.estaCant)}</td>
+                    <td className="px-2 py-1 border border-gray-200 text-right font-medium text-gray-900">{formatMXN(fila.estaImp)}</td>
+                    <td className="px-2 py-1 border border-gray-200 text-right text-gray-700">{formatCantidad(fila.nuevoCant)}</td>
+                    <td className="px-2 py-1 border border-gray-200 text-right text-gray-900">{formatMXN(fila.nuevoImp)}</td>
+                    <td className={`px-2 py-1 border border-gray-200 text-right ${fila.saldoCant < 0 ? 'text-red-600' : 'text-gray-700'}`}>{formatCantidad(fila.saldoCant)}</td>
+                    <td className={`px-2 py-1 border border-gray-200 text-right font-medium ${fila.saldoImp < 0 ? 'text-red-600' : 'text-gray-900'}`}>{formatMXN(fila.saldoImp)}</td>
                   </tr>
                 )
               })}
@@ -346,32 +312,17 @@ export default function RelacionEstimacion() {
 
         {/* Firmas */}
         <div className="px-2 pt-6 pb-4">
-          {(() => {
-            const empresaDe = puesto =>
-              puesto === 'contratista' ? (contratista?.razon_social || contratista?.nombre || '')
-              : puesto === 'interventora' ? ''
-              : (contrato?.spvs?.razon_social || '')
-            const puestosFirmantes = getPuestosActivos(firmantesConfig, 'estimacion', contrato?.spvs)
-            const firmantes = puestosFirmantes.map(puesto => ({
-              puesto,
-              titulo: getLabelPuesto(puesto),
-              nombre: getNombreFirmante(puesto, contrato?.spvs, contrato),
-              empresa: empresaDe(puesto),
-            }))
-            return (
-              <div className="grid gap-8 mt-8" style={{ gridTemplateColumns: `repeat(${firmantes.length}, minmax(0, 1fr))` }}>
-                {firmantes.map(f => (
-                  <div key={f.puesto} className="text-center">
-                    <div className="border-t border-gray-400 pt-3 mt-12">
-                      <p className="text-xs font-semibold text-gray-700">{f.titulo}</p>
-                      {f.nombre && <p className="text-xs text-gray-500 mt-0.5">{f.nombre}</p>}
-                      {f.empresa && f.empresa !== f.nombre && <p className="text-xs text-gray-400 mt-0.5">{f.empresa}</p>}
-                    </div>
-                  </div>
-                ))}
+          <div className="grid gap-8 mt-8" style={{ gridTemplateColumns: `repeat(${firmas.length}, minmax(0, 1fr))` }}>
+            {firmas.map(f => (
+              <div key={f.key} className="text-center">
+                <div className="border-t border-gray-400 pt-3 mt-12">
+                  <p className="text-xs font-semibold text-gray-700">{f.puesto}</p>
+                  {f.nombre && <p className="text-xs text-gray-500 mt-0.5">{f.nombre}</p>}
+                  {f.entidad && <p className="text-xs text-gray-400 mt-0.5">{f.entidad}</p>}
+                </div>
               </div>
-            )
-          })()}
+            ))}
+          </div>
         </div>
 
       </div>

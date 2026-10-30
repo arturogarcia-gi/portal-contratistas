@@ -366,7 +366,7 @@ export default function EstadoCuenta() {
             const puestosFirmantes = getPuestosActivos(firmantesConfig, 'estado_cuenta', contrato.spvs)
             const firmantes = puestosFirmantes.map(puesto => ({
               puesto,
-              titulo: getLabelPuesto(puesto),
+              titulo: getLabelPuesto(puesto, contrato.spvs),
               nombre: getNombreFirmante(puesto, contrato.spvs, contrato),
               empresa: empresaDe(puesto),
             }))
