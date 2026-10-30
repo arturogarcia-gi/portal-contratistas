@@ -134,7 +134,7 @@ const esFormula = a => !!(ws.getCell(a).value && ws.getCell(a).value.formula)
   check('H dato importe acumulado anterior (valor)', ws.getCell(`H${r111}`).value, f111.acumImp)
   check('I dato cantidad esta estimación (todos los decimales)', ws.getCell(`I${r111}`).value, 1000.5678)
   for (const c of 'DEGHI') check(`${c}${r111} es valor`, esFormula(`${c}${r111}`), false)
-  const formulas = { F: `ROUND(E${r111}*D${r111},2)`, J: `ROUND(I${r111}*D${r111},2)`, K: `G${r111}+I${r111}`, L: `H${r111}+J${r111}`, M: `ROUND(E${r111}-K${r111},6)`, N: `F${r111}-L${r111}` }
+  const formulas = { F: `ROUND(E${r111}*D${r111},2)`, J: `ROUND(I${r111}*D${r111},2)`, K: `G${r111}+I${r111}`, L: `ROUND(H${r111}+J${r111},2)`, M: `ROUND(E${r111}-K${r111},6)`, N: `ROUND(F${r111}-L${r111},2)` }
   for (const [c, f] of Object.entries(formulas)) check(`${c}${r111} fórmula`, ws.getCell(`${c}${r111}`).value.formula, f)
   check(`fuente azul solo en I${r111}`, ws.getCell(`I${r111}`).font.color.argb, 'FF1D4ED8')
   for (const c of 'DEFGHJKLMN') check(`fuente negra ${c}${r111}`, ws.getCell(`${c}${r111}`).font.color.argb, 'FF000000')
@@ -147,7 +147,7 @@ const esFormula = a => !!(ws.getCell(a).value && ws.getCell(a).value.formula)
 
   // (b) acumulado anterior con otro precio: L = H + J, no K * P.U.
   const resL = res(ws.getCell(`L${r111}`).value)
-  cerca('(b) L = H + J', resL, f111.acumImp + res(ws.getCell(`J${r111}`).value), 1e-6)
+  cerca('(b) L = ROUND(H + J, 2)', resL, redond(f111.acumImp + res(ws.getCell(`J${r111}`).value), 2), 1e-6)
   check('(b) L difiere de ROUND(K*D,2) (no depende del P.U. actual)', Math.abs(resL - redond((f111.acumCant + 1000.5678) * 345.678, 2)) > 1, true)
 
   // (a) P.U. cobrado distinto: J es valor azul con el importe guardado, y hay nota
@@ -254,6 +254,19 @@ const esFormula = a => !!(ws.getCell(a).value && ws.getCell(a).value.formula)
     check(`TOTAL ${c}: |hoja − pantalla| ≤ 1.5 centavos por fila de concepto`, Math.abs(hoja - pant) <= 0.015 * co.length, true)
   }
   console.log('')
+}
+
+// Concepto agotado: N no queda en negativo (sin -0.00 en rojo)
+{
+  const { filas: fa } = construirFilasRelacion({
+    conceptos: [{ id: 'ca', clave: '1', descripcion: 'Agotado', unidad: 'kg', tipo: 'CO', jerarquia: '1', orden: 1, cantidad_contratada: 1000.75, precio_unitario: 31.337 }],
+    acumAnterior: { ca: { cantidad: 1000.75, importe: 1000.75 * 31.337 } },
+    lineasEsta: [],
+  })
+  const w = await generar([], { filas: fa })
+  check('concepto agotado: M = 0', res(w.getCell('M10').value), 0)
+  check('concepto agotado: N = ROUND(F-L,2)', w.getCell('N10').value.formula, 'ROUND(F10-L10,2)')
+  check('concepto agotado: N no es negativo (sin -0.00)', res(w.getCell('N10').value) >= 0, true)
 }
 
 // --- 3) repartirColumnas: separador de 1 columna entre bloques, cobertura A..N, ancho parejo ---

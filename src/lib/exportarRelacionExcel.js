@@ -67,7 +67,7 @@ export function redondeoExcel(n, dec = 2) {
 const mxn = n => (n == null ? '—' : '$' + Number(n).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 4 }))
 
 // Lista de rangos contiguos de filas de hoja de una columna: "F12:F13,F15,F17:F20"
-function listaRangos(columna, rows) {
+export function listaRangos(columna, rows) {
   const out = []
   let ini = null
   let prev = null
@@ -172,8 +172,8 @@ export async function construirLibroRelacion({ estimacion, contrato, contratista
     const jFormula = redondeoExcel(f.estaCant * f.pu)
     const jValor = Math.abs(f.estaImp - jFormula) > TOL_J + 1e-9 // P.U. cobrado distinto: J = importe guardado
     const J = jValor ? f.estaImp : jFormula
-    const L = f.acumImp + J
-    return { K, F, J, jValor, L, M: redondeoExcel(f.contratoCant - K, 6), N: F - L }
+    const L = redondeoExcel(f.acumImp + J)
+    return { K, F, J, jValor, L, M: redondeoExcel(f.contratoCant - K, 6), N: redondeoExcel(F - L) }
   })
   const resultado = (j, c) => (c === 'H' ? filas[j].acumImp : calc[j][c])
   const sumaRes = (idxs, c) => idxs.reduce((acc, j) => acc + resultado(j, c), 0)
@@ -201,9 +201,9 @@ export async function construirLibroRelacion({ estimacion, contrato, contratista
         f.acumCant, f.acumImp, f.estaCant,
         c.jValor ? f.estaImp : { formula: `ROUND(I${n}*D${n},2)`, result: c.J },
         { formula: `G${n}+I${n}`, result: c.K },
-        { formula: `H${n}+J${n}`, result: c.L },
+        { formula: `ROUND(H${n}+J${n},2)`, result: c.L },
         { formula: `ROUND(E${n}-K${n},6)`, result: c.M },
-        { formula: `F${n}-L${n}`, result: c.N }]
+        { formula: `ROUND(F${n}-L${n},2)`, result: c.N }]
       if (c.jValor) {
         const pc = f.puCobrado ?? (f.estaCant ? f.estaImp / f.estaCant : null)
         notasJ.push(`${f.clave}: P.U. cobrado ${mxn(pc)} (contratado ${mxn(f.pu)}); importe de esta estimación ${mxn(f.estaImp)}`)
