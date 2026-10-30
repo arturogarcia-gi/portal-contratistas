@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom'
 import * as XLSX from 'xlsx'
 import { supabase } from '../lib/supabase'
 import { cargarDatosAmortizacion, calcAmortizacion } from '../lib/amortizacionAnticipo'
+import { construirLibroPlantilla, descargarPlantillaCarga, cargarAcumuladoConceptos, esPlantillaNueva, leerPlantillaCarga } from '../lib/plantillaCarga'
 import { ESTADO_COLORS as ESTADO_COLORS_ESTIMACION, ESTADO_LABELS as ESTADO_LABELS_ESTIMACION } from '../lib/estadosEstimacion'
 
 const ESTADOS_ESTIMACION_NO_CUENTAN = ['cancelada', 'rechazada', 'rechazada_auditoria']
@@ -27,8 +28,6 @@ function mensajeSinPeriodo(contrato, proximoPeriodo) {
   }
   return 'No hay un periodo abierto disponible por el momento. Tu periodo se habilita en cuanto GI MTY lo active. Si lo necesitas hoy, contacta a GI MTY.'
 }
-
-const ESTADOS_CUENTAN_SALDO = ['en_revision', 'autorizada', 'correo_enviado', 'con_factura', 'pagada']
 
 function formatMXN(n) {
   return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 2 }).format(n || 0)
@@ -63,24 +62,20 @@ function ordenarPorJerarquia(lista) {
   })
 }
 
-async function fetchAcumuladoMap(contratoId) {
-  const { data: ests } = await supabase
-    .from('estimaciones')
-    .select('id')
-    .eq('contrato_id', contratoId)
-    .in('estado', ESTADOS_CUENTAN_SALDO)
+// La plantilla nueva muestra y resuelve la misma clave que ve el contratista en la anterior
+const claveVisible = c => ({ ...c, clave: c.clave_concepto || c.clave })
 
-  const acumuladoMap = {}
-  if (ests && ests.length > 0) {
-    const { data: linPrev } = await supabase
-      .from('estimacion_lineas')
-      .select('concepto_id, cantidad_periodo')
-      .in('estimacion_id', ests.map(e => e.id))
-    ;(linPrev || []).forEach(l => {
-      if (l.concepto_id) acumuladoMap[l.concepto_id] = (acumuladoMap[l.concepto_id] || 0) + l.cantidad_periodo
-    })
+// Línea con los campos que usa el resto del flujo (importe con round2, volumen)
+function completarLinea(l) {
+  const acumTotal = l.cantidad_acumulada_anterior + l.cantidad_periodo
+  const pctVolumen = l.cantidad_contratada > 0 ? (acumTotal / l.cantidad_contratada) * 100 : 0
+  return {
+    ...l,
+    cantidad_acumulada_total: acumTotal,
+    importe_periodo: round2(l.cantidad_periodo * l.pu_cobrado),
+    validacion_pu: 'ok',
+    validacion_volumen: pctVolumen > 100 ? 'excede' : pctVolumen > 90 ? 'limite' : 'ok',
   }
-  return acumuladoMap
 }
 
 function etiquetaAmortizacion(calc, valor, contrato) {
@@ -108,6 +103,7 @@ export default function EstimacionesContrato() {
   const [modalPaso, setModalPaso] = useState(1)
   const [conceptos, setConceptos] = useState([])
   const [acumuladoMap, setAcumuladoMap] = useState({})
+  const [avisosCarga, setAvisosCarga] = useState([])
   const [cargandoModal, setCargandoModal] = useState(false)
   const [descargando, setDescargando] = useState(false)
   const [uploadErrors, setUploadErrors] = useState([])
@@ -192,6 +188,28 @@ export default function EstimacionesContrato() {
     return (data || []).length > 0
   }
 
+  // Catálogo completo (CO y AG) y acumulado frescos desde la base
+  async function cargarCatalogoYAcumulado() {
+    const [{ data: cp, error: cpError }, acumulado] = await Promise.all([
+      supabase.from('conceptos').select('*').eq('contrato_id', id).order('orden'),
+      cargarAcumuladoConceptos(supabase, id),
+    ])
+    if (cpError) throw cpError
+    return { catalogo: cp || [], acumulado }
+  }
+
+  async function siguienteNumeroEstimacion() {
+    const { data, error: e } = await supabase
+      .from('estimaciones')
+      .select('numero_estimacion')
+      .eq('contrato_id', id)
+      .not('estado', 'eq', 'cancelada')
+      .order('numero_estimacion', { ascending: false })
+      .limit(1)
+    if (e) throw e
+    return (data?.[0]?.numero_estimacion ?? 0) + 1
+  }
+
   async function handleAbrirModal() {
     setError(null)
     try {
@@ -209,6 +227,7 @@ export default function EstimacionesContrato() {
     setShowModal(true)
     setModalPaso(1)
     setUploadErrors([])
+    setAvisosCarga([])
     setLineasValidadas([])
     setErrorCrear(null)
     setErrorFechas(null)
@@ -217,14 +236,12 @@ export default function EstimacionesContrato() {
     setFechaFinEjec(periodoElegido?.fecha_fin || '')
     setCargandoModal(true)
     try {
-      const [{ data: cp, error: cpError }, mapa, datos] = await Promise.all([
-        supabase.from('conceptos').select('*').eq('contrato_id', id).eq('tipo', 'CO'),
-        fetchAcumuladoMap(id),
+      const [{ catalogo: cat, acumulado }, datos] = await Promise.all([
+        cargarCatalogoYAcumulado(),
         cargarDatosAmortizacion(supabase, id),
       ])
-      if (cpError) throw cpError
-      setConceptos(ordenarPorJerarquia(cp || []))
-      setAcumuladoMap(mapa)
+      setConceptos(ordenarPorJerarquia(cat.filter(c => c.tipo === 'CO')))
+      setAcumuladoMap(Object.fromEntries(Object.entries(acumulado).map(([k, v]) => [k, v.cantidad])))
       setDatosAmort(datos)
     } catch (e) {
       setError(e.message)
@@ -276,7 +293,25 @@ export default function EstimacionesContrato() {
     setShowModal(false)
   }
 
-  function handleDescargarPlantilla() {
+  async function handleDescargarPlantilla() {
+    setDescargando(true)
+    try {
+      const { catalogo: cat, acumulado } = await cargarCatalogoYAcumulado() // fresco al descargar
+      const numeroEstimacion = await siguienteNumeroEstimacion()
+      const contratoMeta = { ...contrato, id }
+      const wb = await construirLibroPlantilla({
+        conceptos: cat.map(claveVisible), acumulado,
+        contrato: contratoMeta, periodo: periodoElegido, numeroEstimacion,
+      })
+      await descargarPlantillaCarga(wb, { contrato: contratoMeta, periodo: periodoElegido })
+    } catch (e) {
+      setError('Error al generar la plantilla: ' + e.message)
+    } finally {
+      setDescargando(false)
+    }
+  }
+
+  function handleDescargarPlantillaAnterior() {
     setDescargando(true)
     try {
       const S_HDR = { fill: { patternType: 'solid', fgColor: { rgb: 'FF0A0A0A' } }, font: { bold: true, color: { rgb: 'FFFFFFFF' } } }
@@ -349,9 +384,19 @@ export default function EstimacionesContrato() {
 
   function procesarArchivo(file) {
     const reader = new FileReader()
-    reader.onload = (evt) => {
+    reader.onload = async (evt) => {
       try {
         const wb = XLSX.read(evt.target.result, { type: 'binary' })
+        if (esPlantillaNueva(wb)) {
+          // Revalida contra la base al subir: catálogo y acumulado actuales
+          const { catalogo: cat, acumulado } = await cargarCatalogoYAcumulado()
+          const r = leerPlantillaCarga(wb, { contratoId: id, periodoId: periodoElegido?.id, conceptos: cat.map(claveVisible), acumulado })
+          setAvisosCarga(r.avisos)
+          setUploadErrors(r.errores)
+          setLineasValidadas(r.errores.length === 0 ? r.lineas.map(completarLinea) : [])
+          return
+        }
+        setAvisosCarga(['Estás usando una plantilla anterior; descarga la nueva.'])
         const ws = wb.Sheets[wb.SheetNames[0]]
         const rows = XLSX.utils.sheet_to_json(ws, { defval: '' })
         const filasSanitizadas = rows.map(fila => {
@@ -398,10 +443,7 @@ export default function EstimacionesContrato() {
             errores.push(`${clave} — ${concepto.descripcion?.slice(0, 50)}: el precio unitario fue modificado (catálogo: ${formatMXN(puCatalogo)}, archivo: ${formatMXN(puArchivo)})`)
           }
 
-          const acumTotal = acumAnt + cantidad
-          const pctVolumen = concepto.cantidad_contratada > 0 ? (acumTotal / concepto.cantidad_contratada) * 100 : 0
-
-          lineas.push({
+          lineas.push(completarLinea({
             clave,
             descripcion: concepto.descripcion,
             unidad: concepto.unidad,
@@ -409,13 +451,9 @@ export default function EstimacionesContrato() {
             cantidad_contratada: concepto.cantidad_contratada || 0,
             cantidad_acumulada_anterior: acumAnt,
             cantidad_periodo: cantidad,
-            cantidad_acumulada_total: acumTotal,
             pu_contratado: puCatalogo,
             pu_cobrado: puCatalogo,
-            importe_periodo: round2(cantidad * puCatalogo),
-            validacion_pu: 'ok',
-            validacion_volumen: pctVolumen > 100 ? 'excede' : pctVolumen > 90 ? 'limite' : 'ok',
-          })
+          }))
         }
 
         if (errores.length > 0) {
@@ -459,16 +497,7 @@ export default function EstimacionesContrato() {
         return
       }
 
-      const { data: estActivas, error: estActivasError } = await supabase
-        .from('estimaciones')
-        .select('numero_estimacion')
-        .eq('contrato_id', id)
-        .not('estado', 'eq', 'cancelada')
-        .order('numero_estimacion', { ascending: false })
-        .limit(1)
-      if (estActivasError) throw estActivasError
-
-      const numeroEst = (estActivas?.[0]?.numero_estimacion ?? 0) + 1
+      const numeroEst = await siguienteNumeroEstimacion()
       const hash = Math.random().toString(36).substring(2, 10).toUpperCase()
       const folio = `EST-${contrato.numero}-${String(numeroEst).padStart(3, '0')}-${hash}`
 
@@ -726,7 +755,11 @@ export default function EstimacionesContrato() {
                       </button>
 
                       <p className="text-xs text-gray-500">
-                        Llena la columna <span className="font-medium text-emerald-700">"Cantidad Esta Estimacion"</span> y sube el archivo.
+                        Escribe solo en la columna amarilla <span className="font-medium text-emerald-700">"Esta Estimación – Cantidad"</span> y sube el archivo.{' '}
+                        <button type="button" onClick={handleDescargarPlantillaAnterior} disabled={descargando}
+                          className="text-gray-400 underline hover:text-gray-600 disabled:opacity-40">
+                          plantilla anterior
+                        </button>
                       </p>
                     </>
                   )}
@@ -755,6 +788,16 @@ export default function EstimacionesContrato() {
                               onChange={handleFileInputChange}
                             />
                           </div>
+
+                          {avisosCarga.length > 0 && (
+                            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                              <ul className="space-y-1">
+                                {avisosCarga.map((a, i) => (
+                                  <li key={i} className="text-xs text-amber-700">• {a}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
 
                           {uploadErrors.length > 0 && (
                             <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3">
