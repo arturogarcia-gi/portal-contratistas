@@ -2,6 +2,7 @@
 import { redondeoExcel, listaRangos } from './exportarRelacionExcel.js'
 import { ordenarJerarquia } from './relacionEstimacion.js'
 import { nombreArchivo } from './nombresArchivo.js'
+import { formatMXN2 } from './format.js'
 
 export const VERSION_PLANTILLA = 1
 // Misma regla que la carga y la descarga anteriores de NuevaEstimacion y que el portal:
@@ -10,6 +11,7 @@ export const ESTADOS_CUENTAN_ACUMULADO = ['en_revision', 'autorizada', 'correo_e
 
 const OSCURO = 'FF1F2937'
 const AMARILLO = 'FFFFF2CC'
+const ROJO_CLARO = 'FFFFC7CE'
 const GRIS_GRUPO = 'FFE5E7EB'
 const GRIS_ETIQUETA = 'FF6B7280'
 const BORDE = { style: 'thin', color: { argb: 'FF9CA3AF' } }
@@ -46,12 +48,55 @@ export async function cargarAcumuladoConceptos(supabase, contratoId) {
   return acumulado
 }
 
+// Compensaciones obligatorias por convenio: un concepto cuya cantidad vigente quedó por DEBAJO de lo ya estimado
+// (estimado > cantidad_contratada). La siguiente estimación debe registrar un ajuste negativo exacto igual al exceso,
+// de modo que el concepto termine con estimado = vigente. Opera sobre el estado YA autorizado del catálogo (a
+// diferencia de avisoConvenio.js, que evalúa las líneas de un convenio en borrador). Nada se guarda: se deriva.
+// acumulado puede ser { [id]: { cantidad, importe } } (cargarAcumuladoConceptos) o { [id]: número }.
+// Devuelve un Map por concepto_id: { concepto_id, clave, cantidad_pendiente } (6 decimales, tolerancia 1e-9).
+export function calcularCompensacionPendiente({ conceptos, acumulado }) {
+  const pendientes = new Map()
+  for (const c of conceptos || []) {
+    if (c.tipo === 'AG') continue
+    const id = c.concepto_id ?? c.id
+    const a = acumulado?.[id]
+    const estimado = typeof a === 'number' ? a : (Number(a?.cantidad) || 0)
+    const exceso = estimado - (Number(c.cantidad_contratada) || 0)
+    if (exceso > TOL_SALDO) pendientes.set(id, { concepto_id: id, clave: c.clave, cantidad_pendiente: redondear6(exceso) })
+  }
+  return pendientes
+}
+
+// Mensaje del bloqueo por valor negativo (lo usan el lector y el guardia): el faltante se redondea hacia arriba al centavo
+const mensajeValorNegativo = valor => {
+  const faltante = Math.ceil(-valor * 100 - 1e-9) / 100
+  return `El valor de la estimación quedaría en ${formatMXN2(valor)} por las compensaciones obligatorias: agrega trabajo del periodo por al menos ${formatMXN2(faltante)}.`
+}
+
+// Guardia común ANTES de guardar una estimación (crear o reemplazar), venga de donde venga la captura:
+// cada compensación pendiente debe aparecer con su cantidad exacta y el valor (Σ cantidad × pu_cobrado) no puede ser
+// negativo. `conceptos` y `acumulado` deben venir frescos y resueltos; `lineas` son las que se van a insertar.
+export function validarCompensaciones({ conceptos, acumulado, lineas }) {
+  const errores = []
+  for (const [id, p] of calcularCompensacionPendiente({ conceptos, acumulado })) {
+    const exacto = -p.cantidad_pendiente
+    const aplicado = (lineas || []).filter(l => l.concepto_id === id).reduce((s, l) => s + (Number(l.cantidad_periodo) || 0), 0)
+    if (Math.abs(aplicado - exacto) > TOL_SALDO) {
+      errores.push(`${p.clave}: la estimación debe incluir la compensación obligatoria por convenio de ${exacto} y trae ${redondear6(aplicado)}.`)
+    }
+  }
+  const valorNeto = (lineas || []).reduce((s, l) => s + (Number(l.cantidad_periodo) || 0) * (Number(l.pu_cobrado) || 0), 0)
+  if (valorNeto < -TOL_SALDO) errores.push(mensajeValorNegativo(valorNeto))
+  return { ok: errores.length === 0, errores, valorNeto }
+}
+
 // ---------------------------------------------------------------------------------------------
 // Generador
 // ---------------------------------------------------------------------------------------------
 export async function construirLibroPlantilla({ conceptos, acumulado, contrato, periodo, numeroEstimacion, fechaDescarga = new Date() }) {
   const ExcelJS = (await import('exceljs')).default
   const wb = new ExcelJS.Workbook()
+  const compensaciones = calcularCompensacionPendiente({ conceptos, acumulado })
   const ws = wb.addWorksheet('Estimación', {
     views: [{ state: 'frozen', ySplit: FILA_HDR + 1 }],
     pageSetup: { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0, printTitlesRow: `${FILA_HDR}:${FILA_HDR + 1}` },
@@ -75,7 +120,8 @@ export async function construirLibroPlantilla({ conceptos, acumulado, contrato, 
   ws.getCell('K5').value = 'El número definitivo se asigna al guardar.'
   ws.getCell('K5').font = { italic: true, size: 9, color: { argb: GRIS_ETIQUETA } }
   ws.mergeCells('A6:N6')
-  ws.getCell('A6').value = 'Escribe solo en la columna amarilla "Esta Estimación – Cantidad". El resto de la hoja está protegido.'
+  ws.getCell('A6').value = 'Escribe solo en la columna amarilla "Esta Estimación – Cantidad". El resto de la hoja está protegido.' +
+    (compensaciones.size > 0 ? ' Las celdas en rojo son compensaciones obligatorias por convenio: no se editan y se aplican al cargar.' : '')
   ws.getCell('A6').font = { italic: true, size: 9, color: { argb: GRIS_ETIQUETA } }
 
   // Encabezado de tabla en dos niveles (texto solo en la maestra; las esclavas reciben solo estilo)
@@ -116,9 +162,13 @@ export async function construirLibroPlantilla({ conceptos, acumulado, contrato, 
     const pu = c.precio_unitario || 0
     const E = c.cantidad_contratada || 0
     const a = acumulado[c.id] || { cantidad: 0, importe: 0 }
+    // Compensación obligatoria precargada en I (negativa); si no hay, I queda vacía (0)
+    const I = compensaciones.has(c.id) ? -compensaciones.get(c.id).cantidad_pendiente : 0
     const F = redondeoExcel(E * pu)
-    const L = redondeoExcel(a.importe)
-    return { pu, E, G: a.cantidad, H: a.importe, F, J: 0, K: a.cantidad, L, M: redondeoExcel(E - a.cantidad, 6), N: redondeoExcel(F - L) }
+    const J = redondeoExcel(I * pu)
+    const K = a.cantidad + I
+    const L = redondeoExcel(a.importe + J)
+    return { pu, E, G: a.cantidad, H: a.importe, I, F, J, K, L, M: redondeoExcel(E - K, 6), N: redondeoExcel(F - L) }
   })
   const fmts = [null, null, null, FMT_MXN, FMT_CANT, FMT_MXN, FMT_CANT, FMT_MXN, FMT_CANT_I, FMT_MXN, FMT_CANT, FMT_MXN, FMT_SALDO_CANT, FMT_SALDO_MXN]
   const filasCO = []
@@ -138,7 +188,7 @@ export async function construirLibroPlantilla({ conceptos, acumulado, contrato, 
       filasCO.push(i)
       vals = [c.clave, c.descripcion, c.unidad, k.pu, k.E,
         { formula: `ROUND(E${r}*D${r},2)`, result: k.F },
-        k.G, k.H, null,
+        k.G, k.H, k.I !== 0 ? k.I : null,
         { formula: `ROUND(I${r}*D${r},2)`, result: k.J },
         { formula: `G${r}+I${r}`, result: k.K },
         { formula: `ROUND(H${r}+J${r},2)`, result: k.L },
@@ -163,15 +213,23 @@ export async function construirLibroPlantilla({ conceptos, acumulado, contrato, 
       row.getCell(15).value = c.id // id oculto del concepto
       // Única celda editable: I (cantidad de esta estimación), con fondo amarillo y validación
       const ci = row.getCell(9)
-      ci.protection = { locked: false }
-      ci.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: AMARILLO } }
-      ci.font = { color: { argb: 'FF1D4ED8' } }
-      ci.dataValidation = {
-        type: 'decimal', operator: 'between', allowBlank: true,
-        formulae: [0, `ROUND($E${r}-$G${r},6)`],
-        showInputMessage: true, promptTitle: 'Cantidad de esta estimación',
-        prompt: 'Cantidad ejecutada en el período. Máximo: el saldo disponible.',
-        showErrorMessage: true, errorStyle: 'stop', errorTitle: 'Cantidad no válida', error: MSG_VALIDACION,
+      if (compensaciones.has(c.id)) {
+        // Compensación obligatoria por convenio: valor precargado, celda bloqueada, sin validación y en rojo claro
+        ci.protection = { locked: true }
+        ci.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: ROJO_CLARO } }
+        ci.font = { color: { argb: 'FF9C0006' } }
+        ci.note = 'Compensación obligatoria por convenio'
+      } else {
+        ci.protection = { locked: false }
+        ci.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: AMARILLO } }
+        ci.font = { color: { argb: 'FF1D4ED8' } }
+        ci.dataValidation = {
+          type: 'decimal', operator: 'between', allowBlank: true,
+          formulae: [0, `ROUND($E${r}-$G${r},6)`],
+          showInputMessage: true, promptTitle: 'Cantidad de esta estimación',
+          prompt: 'Cantidad ejecutada en el período. Máximo: el saldo disponible.',
+          showErrorMessage: true, errorStyle: 'stop', errorTitle: 'Cantidad no válida', error: MSG_VALIDACION,
+        }
       }
     }
   })
@@ -300,6 +358,35 @@ export function leerPlantillaCarga(wb, { contratoId, periodoId, conceptos, acumu
   const lineas = []
   const vistos = new Map() // concepto_id -> fila
   const cambiados = []
+
+  // Compensaciones obligatorias por convenio, con el acumulado FRESCO que recibe esta función. Para estos conceptos
+  // se ignora lo que traiga la hoja y se aplica el valor exacto; si la hoja traía otra cosa, solo se avisa.
+  const compensaciones = calcularCompensacionPendiente({ conceptos, acumulado })
+  const compensadas = new Set()
+  const describir = v => (v === undefined || v === null || (typeof v === 'string' && v.trim() === '') ? 'vacío' : typeof v === 'number' ? String(v) : `"${v}"`)
+  const aplicarCompensacion = (concepto, traia, fila) => {
+    const exacto = -compensaciones.get(concepto.id).cantidad_pendiente
+    const acumBase = acumulado[concepto.id]?.cantidad || 0
+    compensadas.add(concepto.id)
+    const igual = typeof traia === 'number' && Math.abs(traia - exacto) <= TOL_SALDO
+    if (!igual) {
+      avisos.push(fila
+        ? `Compensación obligatoria en ${concepto.clave} (fila ${fila}): la hoja traía ${describir(traia)} y se aplicó el valor exacto ${exacto}.`
+        : `Compensación obligatoria en ${concepto.clave}: la hoja no incluía este concepto y se aplicó el valor exacto ${exacto}.`)
+    }
+    lineas.push({
+      clave: concepto.clave,
+      descripcion: concepto.descripcion,
+      unidad: concepto.unidad,
+      concepto_id: concepto.id,
+      cantidad_contratada: concepto.cantidad_contratada || 0,
+      cantidad_acumulada_anterior: acumBase,
+      cantidad_periodo: exacto,
+      pu_contratado: concepto.precio_unitario || 0,
+      pu_cobrado: concepto.precio_unitario || 0,
+      encontrado: true,
+    })
+  }
   const inicio = Number(meta.fila_inicio) || 10
   const fin = Number(meta.fila_fin) || inicio
   for (let r = inicio; r <= fin; r++) {
@@ -317,6 +404,17 @@ export function leerPlantillaCarga(wb, { contratoId, periodoId, conceptos, acumu
       const g = ws[`${colAcum}${r}`]
       const acumBase = acumulado[concepto.id]?.cantidad || 0
       if (g && typeof g.v === 'number' && Math.abs(g.v - acumBase) > TOL_ACUM) cambiados.push(concepto.clave)
+    }
+
+    // Concepto con compensación obligatoria: la regla de cantidad >= 0 no aplica; se usa el valor exacto
+    if (concepto && compensaciones.has(concepto.id)) {
+      if (vistos.has(concepto.id)) {
+        errores.push(`${etiqueta}: el concepto ya aparece en la fila ${vistos.get(concepto.id)}; cada concepto va una sola vez.`)
+        continue
+      }
+      vistos.set(concepto.id, r)
+      aplicarCompensacion(concepto, crudo, r)
+      continue
     }
 
     if (crudo === undefined || crudo === null || (typeof crudo === 'string' && crudo.trim() === '')) continue // vacía
@@ -361,14 +459,25 @@ export function leerPlantillaCarga(wb, { contratoId, periodoId, conceptos, acumu
     })
   }
 
+  // Compensaciones pendientes cuyo concepto no venía en la hoja: también son obligatorias
+  for (const id of compensaciones.keys()) {
+    if (compensadas.has(id)) continue
+    const concepto = candidatos.find(c => (c.concepto_id ?? c.id) === id)
+    if (concepto) aplicarCompensacion(concepto, undefined, null)
+  }
+
   if (cambiados.length) {
     const MAX_CLAVES = 8
     const muestra = cambiados.slice(0, MAX_CLAVES).join(', ') + (cambiados.length > MAX_CLAVES ? `, … y ${cambiados.length - MAX_CLAVES} más` : '')
     avisos.push(`El acumulado cambió en ${cambiados.length} concepto${cambiados.length === 1 ? '' : 's'} desde la descarga (${muestra}). Se usó el acumulado actual.`)
   }
+  // Valor de la estimación (antes de amortización, fondo e IVA): Σ cantidad_periodo × pu_cobrado, sin redondear
+  // (igual que NuevaEstimacion.jsx). Con las compensaciones ya aplicadas, un valor negativo bloquea toda la carga.
+  const valorNeto = lineas.reduce((s, l) => s + l.cantidad_periodo * l.pu_cobrado, 0)
+  if (valorNeto < -TOL_SALDO) errores.push(mensajeValorNegativo(valorNeto))
   if (!errores.length && !lineas.length) {
     avisos.push('El archivo no trae ninguna cantidad en la columna "Esta Estimación – Cantidad". Captura al menos un concepto y vuelve a subirlo.')
     return salida({ vacio: true })
   }
-  return salida({ lineas })
+  return salida({ lineas, valorNeto })
 }

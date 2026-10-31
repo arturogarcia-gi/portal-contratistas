@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom'
 import * as XLSX from 'xlsx'
 import { supabase } from '../lib/supabase'
 import { cargarDatosAmortizacion, calcAmortizacion } from '../lib/amortizacionAnticipo'
-import { construirLibroPlantilla, descargarPlantillaCarga, cargarAcumuladoConceptos, esPlantillaNueva, leerPlantillaCarga } from '../lib/plantillaCarga'
+import { construirLibroPlantilla, descargarPlantillaCarga, cargarAcumuladoConceptos, esPlantillaNueva, leerPlantillaCarga, calcularCompensacionPendiente, validarCompensaciones } from '../lib/plantillaCarga'
 import { ESTADO_COLORS as ESTADO_COLORS_ESTIMACION, ESTADO_LABELS as ESTADO_LABELS_ESTIMACION } from '../lib/estadosEstimacion'
 
 const ESTADOS_ESTIMACION_NO_CUENTAN = ['cancelada', 'rechazada', 'rechazada_auditoria']
@@ -396,6 +396,14 @@ export default function EstimacionesContrato() {
           setLineasValidadas(r.errores.length === 0 ? r.lineas.map(completarLinea) : [])
           return
         }
+        // Con compensaciones pendientes por convenio solo sirve la plantilla nueva (la anterior no puede registrarlas)
+        const compensacionesPend = calcularCompensacionPendiente({ conceptos, acumulado: acumuladoMap })
+        if (compensacionesPend.size > 0) {
+          const claves = [...compensacionesPend.values()].map(p => p.clave).join(', ')
+          setAvisosCarga([])
+          setUploadErrors([`Este contrato tiene compensaciones pendientes por convenio (${claves}): descarga la plantilla nueva. La plantilla anterior no puede registrarlas.`])
+          return
+        }
         setAvisosCarga(['Estás usando una plantilla anterior; descarga la nueva.'])
         const ws = wb.Sheets[wb.SheetNames[0]]
         const rows = XLSX.utils.sheet_to_json(ws, { defval: '' })
@@ -494,6 +502,15 @@ export default function EstimacionesContrato() {
       if (await periodoTieneEstimacion(periodoElegido.id)) {
         setErrorCrear('Este periodo ya tiene una estimación. Cierra el modal y vuelve a intentar.')
         await fetchDatos()
+        return
+      }
+
+      // Guardia: cada compensación obligatoria por convenio debe aparecer con su cantidad exacta y el valor no puede
+      // ser negativo, venga de donde venga la captura. Datos frescos de la base.
+      const { catalogo: catFresco, acumulado: acumFresco } = await cargarCatalogoYAcumulado()
+      const revision = validarCompensaciones({ conceptos: catFresco.map(claveVisible), acumulado: acumFresco, lineas: lineasValidadas })
+      if (!revision.ok) {
+        setErrorCrear('No se puede guardar la estimación. ' + revision.errores.join(' '))
         return
       }
 
