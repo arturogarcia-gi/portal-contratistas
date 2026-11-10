@@ -5,6 +5,8 @@ import { ESTADO_COLORS as ESTADO_COLORS_ESTIMACION, ESTADO_LABELS as ESTADO_LABE
 import { getPuestosActivos, getNombreFirmante, getLabelPuesto } from '../lib/firmantes'
 import { nombreArchivo } from '../lib/nombresArchivo'
 import { useTituloDocumento } from '../hooks/useTituloDocumento'
+import { calcResumenAnticipoFondo } from '../lib/amortizacionAnticipo'
+import { formatMXNFijo, diasEntreISO } from '../lib/format'
 
 function formatMXN(n) {
   return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 }).format(n || 0)
@@ -158,6 +160,12 @@ export default function EstadoCuenta() {
   const saldoPorEstimar = montoVigente - totalEstimadoBruto
   const saldoPorPagar = montoVigente - totalPagadoSinIVA
 
+  const { saldoAnticipoPorAmortizar, fondoRetenidoNeto } =
+    calcResumenAnticipoFondo({ estimaciones, anticipos, fondos })
+
+  const diasOC = diasEntreISO(contrato.fecha_fin_original, contrato.fecha_fin)
+  const textoDiasOC = !diasOC ? '—' : `${diasOC > 0 ? '+' : '−'}${Math.abs(diasOC)} días`
+
   const nombreSpv = (contrato.spvs?.razon_social || '').replace(/\s*(S\.\s?A\.|A\.C\.|S\.C\.).*$/i, '').trim() || 'Generación Industrial Monterrey'
 
   const BADGE = {
@@ -207,20 +215,35 @@ export default function EstadoCuenta() {
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
 
         {/* Header impresión */}
-        <div className="hidden print:block px-8 pt-6 pb-4 border-b border-gray-200">
+        <div className="hidden print:block px-8 pt-6 pb-4 border-b border-gray-200 text-xs text-gray-700">
           <div className="flex items-start justify-between">
             <div>
               <p className="text-xs text-gray-400 uppercase tracking-widest mb-1">{nombreSpv}</p>
               <h1 className="text-lg font-bold text-gray-900">Estado de Cuenta</h1>
               <p className="text-sm text-gray-600 mt-0.5">{contrato.numero} · {contrato.descripcion}</p>
             </div>
-            <div className="text-right text-xs text-gray-500 space-y-1">
-              <p><span className="font-medium">Contratista:</span> {contrato.contratistas?.nombre}</p>
-              <p><span className="font-medium">RFC:</span> {contrato.contratistas?.rfc || '—'}</p>
-              <p><span className="font-medium">Proyecto:</span> {contrato.spvs?.nombre}</p>
-              <p><span className="font-medium">Contrato vigente:</span> {formatMXN(montoVigente)}</p>
-              <p><span className="font-medium">Fecha impresión:</span> {formatFecha(new Date().toISOString().split('T')[0])}</p>
+            <p className="text-gray-500"><span className="font-medium">Fecha impresión:</span> {formatFecha(new Date().toISOString().split('T')[0])}</p>
+          </div>
+          <div className="flex gap-6 mt-3 pt-2 border-t border-gray-100">
+            <p><span className="font-medium">Contratista:</span> {contrato.contratistas?.nombre}</p>
+            <p><span className="font-medium">RFC:</span> {contrato.contratistas?.rfc || '—'}</p>
+            <p><span className="font-medium">Proyecto:</span> {contrato.spvs?.nombre}</p>
+          </div>
+          <div className="grid grid-cols-2 gap-8 mt-2 pt-2 border-t border-gray-100">
+            <div className="space-y-0.5">
+              <p><span className="font-medium">Contrato original:</span> {formatMXNFijo(contrato.monto_original)}</p>
+              <p><span className="font-medium">Órdenes de cambio:</span> {formatMXNFijo(contrato.monto_convenios_autorizados)}</p>
+              <p><span className="font-medium">Contrato vigente:</span> {formatMXNFijo(montoVigente)}</p>
             </div>
+            <div className="space-y-0.5">
+              <p><span className="font-medium">Terminación original:</span> {formatFecha(contrato.fecha_fin_original || contrato.fecha_fin)}</p>
+              <p><span className="font-medium">Órdenes de cambio:</span> {textoDiasOC}</p>
+              <p><span className="font-medium">Contrato vigente:</span> {formatFecha(contrato.fecha_fin)}</p>
+            </div>
+          </div>
+          <div className="flex gap-8 mt-2 pt-2 border-t border-gray-100">
+            <p><span className="font-medium">Anticipo por amortizar:</span> {formatMXNFijo(saldoAnticipoPorAmortizar)}</p>
+            <p><span className="font-medium">Fondo retenido:</span> {formatMXNFijo(fondoRetenidoNeto)}</p>
           </div>
         </div>
 
@@ -240,43 +263,43 @@ export default function EstadoCuenta() {
               <p className="text-base font-semibold text-emerald-700">{formatMXN(montoVigente)}</p>
             </div>
           </div>
-          <div className="grid grid-cols-4 gap-3">
-            <div className="bg-gray-50 rounded-lg p-3">
-              <p className="text-xs text-gray-500 mb-1">Total estimado bruto</p>
-              <p className="text-base font-semibold text-gray-900">{formatMXN(totalEstimadoBruto)}</p>
-            </div>
-            <div className="bg-gray-50 rounded-lg p-3">
-              <p className="text-xs text-gray-500 mb-1">Total pagado sin IVA</p>
-              <p className="text-base font-semibold text-gray-900">{formatMXN(totalPagadoSinIVA)}</p>
-            </div>
-            <div className={`rounded-lg p-3 ${saldoPorEstimar < 0 ? 'bg-red-50' : 'bg-gray-50'}`}>
-              <p className={`text-xs mb-1 ${saldoPorEstimar < 0 ? 'text-red-500' : 'text-gray-500'}`}>Saldo por estimar</p>
-              <p className={`text-base font-semibold ${saldoPorEstimar < 0 ? 'text-red-700' : 'text-gray-900'}`}>{formatMXN(saldoPorEstimar)}</p>
-            </div>
-            <div className={`rounded-lg p-3 ${saldoPorPagar < 0 ? 'bg-red-50' : 'bg-gray-50'}`}>
-              <p className={`text-xs mb-1 ${saldoPorPagar < 0 ? 'text-red-500' : 'text-gray-500'}`}>Saldo por pagar</p>
-              <p className={`text-base font-semibold ${saldoPorPagar < 0 ? 'text-red-700' : 'text-gray-900'}`}>{formatMXN(saldoPorPagar)}</p>
-            </div>
+          <div className="grid grid-cols-6 gap-2">
+            {[
+              ['Total estimado bruto', totalEstimadoBruto, false],
+              ['Saldo por estimar', saldoPorEstimar, true],
+              ['Total pagado sin IVA', totalPagadoSinIVA, false],
+              ['Saldo por pagar', saldoPorPagar, true],
+              ['Anticipo por amortizar', saldoAnticipoPorAmortizar, true],
+              ['Fondo retenido', fondoRetenidoNeto, true],
+            ].map(([label, valor, rojoSiNegativo]) => {
+              const neg = rojoSiNegativo && valor < 0
+              return (
+                <div key={label} className={`rounded-lg p-2.5 ${neg ? 'bg-red-50' : 'bg-gray-50'}`}>
+                  <p className={`text-[11px] mb-1 ${neg ? 'text-red-500' : 'text-gray-500'}`}>{label}</p>
+                  <p className={`text-sm font-semibold whitespace-nowrap ${neg ? 'text-red-700' : 'text-gray-900'}`}>{formatMXNFijo(valor)}</p>
+                </div>
+              )
+            })}
           </div>
         </div>
 
         {/* Tabla */}
         <div className="overflow-x-auto">
-          <table className="w-full text-xs">
+          <table className="w-full text-[11px]">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200">
-                <th className="text-left px-4 py-3 font-medium text-gray-500">Tipo</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-500">No. Factura</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-500">Fecha Fact.</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-500">Concepto</th>
-                <th className="text-right px-4 py-3 font-medium text-gray-500">Monto Estimado</th>
-                <th className="text-right px-4 py-3 font-medium text-gray-500">Amort. Anticipo</th>
-                <th className="text-right px-4 py-3 font-medium text-gray-500">Ret. Fondo</th>
-                <th className="text-right px-4 py-3 font-medium text-gray-500">Subtotal</th>
-                <th className="text-right px-4 py-3 font-medium text-gray-500">IVA</th>
-                <th className="text-right px-4 py-3 font-medium text-gray-500">Total</th>
-                <th className="text-center px-4 py-3 font-medium text-gray-500">Fecha Pago</th>
-                <th className="text-center px-4 py-3 font-medium text-gray-500">Estado</th>
+                <th className="text-left px-2 py-3 font-medium text-gray-500">Tipo</th>
+                <th className="text-left px-2 py-3 font-medium text-gray-500">No. Factura</th>
+                <th className="text-left px-2 py-3 font-medium text-gray-500">Fecha Fact.</th>
+                <th className="text-left px-2 py-3 font-medium text-gray-500">Concepto</th>
+                <th className="text-right px-2 py-3 font-medium text-gray-500 whitespace-nowrap">Monto Estimado</th>
+                <th className="text-right px-2 py-3 font-medium text-gray-500 whitespace-nowrap">Amort. Anticipo</th>
+                <th className="text-right px-2 py-3 font-medium text-gray-500 whitespace-nowrap">Ret. Fondo</th>
+                <th className="text-right px-2 py-3 font-medium text-gray-500 whitespace-nowrap">Subtotal</th>
+                <th className="text-right px-2 py-3 font-medium text-gray-500 whitespace-nowrap">IVA</th>
+                <th className="text-right px-2 py-3 font-medium text-gray-500 whitespace-nowrap">Total</th>
+                <th className="text-center px-2 py-3 font-medium text-gray-500 whitespace-nowrap">Fecha Pago</th>
+                <th className="text-center px-2 py-3 font-medium text-gray-500 whitespace-nowrap">Estado</th>
               </tr>
             </thead>
             <tbody>
@@ -299,28 +322,28 @@ export default function EstadoCuenta() {
                       onClick={() => fila.path && navigate(fila.path)}
                       className={`border-b border-gray-50 hover:bg-gray-50 transition-colors ${fila.path ? 'cursor-pointer' : ''} ${i % 2 === 0 ? '' : 'bg-gray-50/40'}`}
                     >
-                      <td className="px-4 py-2.5">
+                      <td className="px-2 py-2.5">
                         <span className={`px-2 py-0.5 rounded-full text-xs font-medium print:text-[8px] ${
                           fila.tipo === 'Estimación' ? 'bg-emerald-50 text-emerald-700' :
                           fila.tipo === 'Anticipo' ? 'bg-blue-50 text-blue-700' :
                           'bg-orange-50 text-orange-700'
                         }`}>{fila.tipo}</span>
                       </td>
-                      <td className="px-4 py-2.5 text-gray-700 font-mono">{fila.numero_factura}</td>
-                      <td className="px-4 py-2.5 text-gray-500">{formatFecha(fila.fecha?.split('T')[0])}</td>
-                      <td className="px-4 py-2.5 text-gray-700">{fila.referencia}</td>
-                      <td className="px-4 py-2.5 text-right text-gray-800 font-medium">
-                        {fila.tipo === 'Estimación' ? formatMXN(fila.monto_estimado) : '—'}
+                      <td className="px-2 py-2.5 text-gray-700 font-mono">{fila.numero_factura}</td>
+                      <td className="px-2 py-2.5 text-gray-500">{formatFecha(fila.fecha?.split('T')[0])}</td>
+                      <td className="px-2 py-2.5 text-gray-700">{fila.referencia}</td>
+                      <td className="px-2 py-2.5 text-right text-gray-800 font-medium">
+                        {fila.tipo === 'Estimación' ? formatMXNFijo(fila.monto_estimado) : '—'}
                       </td>
-                      <td className="px-4 py-2.5 text-right text-red-500">{fila.amort_anticipo ? `(${formatMXN(fila.amort_anticipo)})` : '—'}</td>
-                      <td className="px-4 py-2.5 text-right text-red-500">{fila.retencion_fondo ? `(${formatMXN(fila.retencion_fondo)})` : '—'}</td>
-                      <td className="px-4 py-2.5 text-right text-gray-800">{formatMXN(subtotal)}</td>
-                      <td className="px-4 py-2.5 text-right text-gray-600">{formatMXN(iva)}</td>
-                      <td className="px-4 py-2.5 text-right font-semibold text-gray-900">{formatMXN(total)}</td>
-                      <td className="px-4 py-2.5 text-center text-gray-600 text-xs">
+                      <td className="px-2 py-2.5 text-right text-red-500">{fila.amort_anticipo ? `(${formatMXNFijo(fila.amort_anticipo)})` : '—'}</td>
+                      <td className="px-2 py-2.5 text-right text-red-500">{fila.retencion_fondo ? `(${formatMXNFijo(fila.retencion_fondo)})` : '—'}</td>
+                      <td className="px-2 py-2.5 text-right text-gray-800">{formatMXNFijo(subtotal)}</td>
+                      <td className="px-2 py-2.5 text-right text-gray-600">{formatMXNFijo(iva)}</td>
+                      <td className="px-2 py-2.5 text-right font-semibold text-gray-900">{formatMXNFijo(total)}</td>
+                      <td className="px-2 py-2.5 text-center text-gray-600 text-xs">
                         {fila.fecha_pago ? formatFecha(fila.fecha_pago.split('T')[0]) : '—'}
                       </td>
-                      <td className="px-4 py-2.5 text-center">
+                      <td className="px-2 py-2.5 text-center">
                         <span className={`px-2 py-0.5 rounded-full text-xs font-medium capitalize print:text-[8px] ${fila.fecha_pago ? 'bg-blue-50 text-blue-700' : (BADGE[fila.estado] || 'bg-gray-100 text-gray-500')}`}>
                           {fila.fecha_pago ? 'Pagado' : (ESTADO_LABELS[fila.estado] || fila.estado)}
                         </span>
@@ -333,15 +356,15 @@ export default function EstadoCuenta() {
             {filasFiltradas.length > 0 && (
               <tfoot>
                 <tr className="bg-gray-900 text-white">
-                  <td colSpan={4} className="px-4 py-3 font-semibold">
+                  <td colSpan={4} className="px-2 py-3 font-semibold">
                     TOTALES ({filasFiltradas.length} registro{filasFiltradas.length !== 1 ? 's' : ''})
                   </td>
-                  <td className="px-4 py-3 text-right font-semibold">{formatMXN(totalMonto)}</td>
-                  <td className="px-4 py-3 text-right font-semibold text-red-300">{totalAmort ? `(${formatMXN(totalAmort)})` : '—'}</td>
-                  <td className="px-4 py-3 text-right font-semibold text-red-300">{totalFondo ? `(${formatMXN(totalFondo)})` : '—'}</td>
-                  <td className="px-4 py-3 text-right font-semibold">{formatMXN(totalSubtotal)}</td>
-                  <td className="px-4 py-3 text-right font-semibold">{formatMXN(totalIVA)}</td>
-                  <td className="px-4 py-3 text-right font-bold text-emerald-300">{formatMXN(totalNeto)}</td>
+                  <td className="px-2 py-3 text-right font-semibold">{formatMXNFijo(totalMonto)}</td>
+                  <td className="px-2 py-3 text-right font-semibold text-red-300">{totalAmort ? `(${formatMXNFijo(totalAmort)})` : '—'}</td>
+                  <td className="px-2 py-3 text-right font-semibold text-red-300">{totalFondo ? `(${formatMXNFijo(totalFondo)})` : '—'}</td>
+                  <td className="px-2 py-3 text-right font-semibold">{formatMXNFijo(totalSubtotal)}</td>
+                  <td className="px-2 py-3 text-right font-semibold">{formatMXNFijo(totalIVA)}</td>
+                  <td className="px-2 py-3 text-right font-bold text-emerald-300">{formatMXNFijo(totalNeto)}</td>
                   <td />
                   <td />
                 </tr>
