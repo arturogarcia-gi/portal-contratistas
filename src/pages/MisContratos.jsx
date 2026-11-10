@@ -36,7 +36,7 @@ export default function MisContratos() {
 
       const { data, error: contratosError } = await supabase
         .from('contratos')
-        .select('id, numero, descripcion, monto_original, fecha_inicio, fecha_fin, spvs(nombre)')
+        .select('id, numero, descripcion, monto_original, monto_vigente, fecha_inicio, fecha_fin, spvs(nombre)')
         .eq('contratista_id', acceso.contratista_id)
       if (contratosError) throw contratosError
 
@@ -80,7 +80,7 @@ export default function MisContratos() {
               <span className="text-xs text-gray-500">{c.spvs?.nombre}</span>
             </div>
             <p className="text-sm text-gray-900 font-medium mb-3">{c.descripcion || 'Sin descripción'}</p>
-            <p className="text-lg font-semibold text-gray-900 mb-3">{formatMXN(c.monto_original)}</p>
+            <p className="text-lg font-semibold text-gray-900 mb-3">{formatMXN(c.monto_vigente ?? c.monto_original)}</p>
             <div className="flex justify-between text-xs text-gray-500 mb-4">
               <span>Inicio: {formatFecha(c.fecha_inicio)}</span>
               <span>Fin: {formatFecha(c.fecha_fin)}</span>
