@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom'
 import * as XLSX from 'xlsx'
 import { supabase } from '../lib/supabase'
 import { cargarDatosAmortizacion, calcAmortizacion } from '../lib/amortizacionAnticipo'
-import { construirLibroPlantilla, descargarPlantillaCarga, cargarAcumuladoConceptos, esPlantillaNueva, leerPlantillaCarga, calcularCompensacionPendiente, validarCompensaciones } from '../lib/plantillaCarga'
+import { construirLibroPlantilla, descargarPlantillaCarga, cargarAcumuladoConceptos, esPlantillaNueva, leerPlantillaCarga, calcularCompensacionPendiente, validarCompensaciones, ESTADOS_CUENTAN_ACUMULADO } from '../lib/plantillaCarga'
 import { ESTADO_COLORS as ESTADO_COLORS_ESTIMACION, ESTADO_LABELS as ESTADO_LABELS_ESTIMACION } from '../lib/estadosEstimacion'
 
 const ESTADOS_ESTIMACION_NO_CUENTAN = ['cancelada', 'rechazada', 'rechazada_auditoria']
@@ -524,7 +524,7 @@ export default function EstimacionesContrato() {
         .from('estimaciones')
         .select('subtotal')
         .eq('contrato_id', id)
-        .in('estado', ['borrador', 'en_revision', 'autorizada', 'correo_enviado', 'con_factura', 'pagada'])
+        .in('estado', ['borrador', ...ESTADOS_CUENTAN_ACUMULADO])
       if (prevError) throw prevError
       const sumaPrevia = (prevEsts || []).reduce((sum, e) => sum + (e.subtotal || 0), 0)
       if (sumaPrevia + valorEstimacion > (contrato?.monto_vigente ?? contrato?.monto_original ?? 0)) {

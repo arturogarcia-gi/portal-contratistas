@@ -6,6 +6,7 @@ import { nombreArchivo } from '../lib/nombresArchivo'
 import { useTituloDocumento } from '../hooks/useTituloDocumento'
 import { construirFilasRelacion, armarFirmas, formatCantidad } from '../lib/relacionEstimacion'
 import { exportarRelacionExcel } from '../lib/exportarRelacionExcel'
+import { ESTADOS_CUENTAN_ACUMULADO } from '../lib/plantillaCarga'
 
 function formatMXN(n) {
   return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 2 }).format(n || 0)
@@ -17,8 +18,6 @@ function formatFecha(f) {
   const meses = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
   return `${d}/${meses[parseInt(m)-1]}/${y}`
 }
-
-const ESTADOS_ACTIVOS = ['en_revision', 'autorizada', 'correo_enviado', 'con_factura', 'pagada']
 
 export default function RelacionEstimacion() {
   const { id, estimacionId } = useParams()
@@ -65,7 +64,7 @@ export default function RelacionEstimacion() {
         .from('estimaciones')
         .select('id')
         .eq('contrato_id', id)
-        .in('estado', ESTADOS_ACTIVOS)
+        .in('estado', ESTADOS_CUENTAN_ACUMULADO)
         .lt('numero_estimacion', est.numero_estimacion)
 
       const mapaAcum = {}

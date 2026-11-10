@@ -7,7 +7,7 @@ import { formatMXN2 } from './format.js'
 export const VERSION_PLANTILLA = 1
 // Misma regla que la carga y la descarga anteriores de NuevaEstimacion y que el portal:
 // el acumulado anterior suma las estimaciones del contrato en estos estados.
-export const ESTADOS_CUENTAN_ACUMULADO = ['en_revision', 'autorizada', 'correo_enviado', 'con_factura', 'pagada']
+export const ESTADOS_CUENTAN_ACUMULADO = ['en_revision', 'en_revision_auditoria', 'autorizada', 'correo_enviado', 'con_factura', 'pagada']
 
 const OSCURO = 'FF1F2937'
 const AMARILLO = 'FFFFF2CC'
