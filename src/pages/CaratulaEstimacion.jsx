@@ -79,6 +79,20 @@ export default function CaratulaEstimacion() {
   if (loading) return <div className="text-center py-12 text-gray-400 text-sm">Cargando carátula...</div>
   if (!estimacion) return <div className="text-center py-12 text-gray-400 text-sm">{error || 'Estimación no encontrada.'}</div>
 
+  if (estimacion.estado === 'borrador') {
+    return (
+      <div className="max-w-md mx-auto mt-12 text-center">
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-5">
+          <p className="text-sm font-medium text-amber-800">Esta estimación aún no se ha enviado a revisión</p>
+          <p className="text-xs text-amber-700 mt-1">La carátula estará disponible una vez que la envíes a revisión.</p>
+        </div>
+        <button onClick={() => navigate(-1)} className="mt-4 px-4 py-2 text-sm border border-gray-200 rounded-lg hover:bg-gray-50 text-gray-600">
+          ← Regresar
+        </button>
+      </div>
+    )
+  }
+
   const contrato = estimacion.contratos
   const contratista = contrato?.contratistas
   const valorEstimacion = estimacion.subtotal

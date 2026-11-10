@@ -3,6 +3,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { cargarDatosAmortizacion, calcAmortizacion } from '../lib/amortizacionAnticipo'
 import { ESTADO_COLORS, ESTADO_LABELS } from '../lib/estadosEstimacion'
+import { diasDesde } from '../lib/format'
 
 function formatMXN(n) {
   return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 2 }).format(n || 0)
@@ -139,6 +140,9 @@ export default function EstimacionDetalle() {
     ? `Amortización ${(amortizacion / valorEstimacion * 100).toFixed(1)}%`
     : `Amortización ${contrato?.pct_anticipo}%`
   const tieneEjecucion = estimacion.fecha_inicio_ejecucion && estimacion.fecha_fin_ejecucion
+  const diasBorrador = estimacion.estado === 'borrador' ? diasDesde(estimacion.created_at) : null
+  const textoDiasBorrador = diasBorrador == null ? '' : diasBorrador <= 0 ? ' (creada hoy)'
+    : diasBorrador === 1 ? ' (creada hace 1 día)' : ` (creada hace ${diasBorrador} días)`
 
   return (
     <div>
@@ -178,10 +182,12 @@ export default function EstimacionDetalle() {
         </div>
 
         <div className="flex gap-2 flex-wrap justify-end">
-          <Link to={`/contrato/${id}/estimacion/${estimacionId}/caratula`}
-            className="px-4 py-2 text-sm border border-gray-200 rounded-lg hover:bg-gray-50 text-gray-600">
-            🖨️ Ver carátula
-          </Link>
+          {estimacion.estado !== 'borrador' && (
+            <Link to={`/contrato/${id}/estimacion/${estimacionId}/caratula`}
+              className="px-4 py-2 text-sm border border-gray-200 rounded-lg hover:bg-gray-50 text-gray-600">
+              🖨️ Ver carátula
+            </Link>
+          )}
           <Link to={`/contrato/${id}/estimacion/${estimacionId}/relacion`}
             className="px-4 py-2 text-sm border border-gray-200 rounded-lg hover:bg-gray-50 text-gray-600">
             📋 Estimación Detallada
@@ -206,6 +212,13 @@ export default function EstimacionDetalle() {
           <p className="text-sm font-medium text-red-800">
             {estimacion.estado === 'rechazada' ? '❌ Estimación rechazada definitivamente' : '❌ Rechazada por auditoría'}
           </p>
+        </div>
+      )}
+
+      {estimacion.estado === 'borrador' && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6">
+          <p className="text-sm font-medium text-amber-800">📝 Estimación en Borrador, pendiente de enviar a revisión{textoDiasBorrador}</p>
+          <p className="text-xs text-amber-700 mt-1">Esta estimación sigue en Borrador: aún no se ha enviado a revisión. Debes darle "Enviar a revisión" en la app el mismo día en que envíes por correo todo el soporte (ya cargado en SharePoint).</p>
         </div>
       )}
 

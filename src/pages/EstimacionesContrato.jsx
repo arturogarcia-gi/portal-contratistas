@@ -42,7 +42,7 @@ function formatFecha(f) {
 
 const round2 = (n) => Math.round(n * 100) / 100
 
-const ESTADO_COLORS = { ...ESTADO_COLORS_ESTIMACION, pendiente: 'bg-amber-50 text-amber-700' }
+const ESTADO_COLORS = { ...ESTADO_COLORS_ESTIMACION, pendiente: 'bg-amber-50 text-amber-700', borrador: 'bg-amber-100 text-amber-800' }
 const ESTADO_LABELS = { ...ESTADO_LABELS_ESTIMACION, pendiente: 'Pendiente' }
 
 function estadoEfectivo(estimacion) {

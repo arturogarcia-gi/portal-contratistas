@@ -14,6 +14,7 @@ function formatFecha(f) {
 export default function MisContratos() {
   const navigate = useNavigate()
   const [contratos, setContratos] = useState([])
+  const [borradoresPorContrato, setBorradoresPorContrato] = useState({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
@@ -41,6 +42,23 @@ export default function MisContratos() {
       if (contratosError) throw contratosError
 
       setContratos(data || [])
+
+      // Estimaciones en borrador de TODOS los contratos en una sola consulta; se cuentan aquí.
+      // Si falla, la lista de contratos igual se muestra (el contador es informativo).
+      if (data?.length) {
+        const { data: borradores, error: borError } = await supabase
+          .from('estimaciones')
+          .select('contrato_id')
+          .eq('estado', 'borrador')
+          .in('contrato_id', data.map(c => c.id))
+        if (borError) {
+          console.error('Error al contar estimaciones en borrador:', borError)
+        } else {
+          const conteo = {}
+          ;(borradores || []).forEach(b => { conteo[b.contrato_id] = (conteo[b.contrato_id] || 0) + 1 })
+          setBorradoresPorContrato(conteo)
+        }
+      }
     } catch (e) {
       setError(e.message)
     } finally {
@@ -85,6 +103,13 @@ export default function MisContratos() {
               <span>Inicio: {formatFecha(c.fecha_inicio)}</span>
               <span>Fin: {formatFecha(c.fecha_fin)}</span>
             </div>
+            {borradoresPorContrato[c.id] > 0 && (
+              <p className="text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 mb-4">
+                {borradoresPorContrato[c.id] === 1
+                  ? '1 estimación pendiente de enviar a revisión'
+                  : `${borradoresPorContrato[c.id]} estimaciones pendientes de enviar a revisión`}
+              </p>
+            )}
             <div className="flex gap-2">
               <button
                 onClick={() => navigate(`/contrato/${c.id}/estimaciones`)}
