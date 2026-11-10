@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom'
 import * as XLSX from 'xlsx'
 import { supabase } from '../lib/supabase'
-import { cargarDatosAmortizacion, calcAmortizacion } from '../lib/amortizacionAnticipo'
+import { cargarDatosAmortizacion } from '../lib/amortizacionAnticipo'
 import { construirLibroPlantilla, descargarPlantillaCarga, cargarAcumuladoConceptos, esPlantillaNueva, leerPlantillaCarga, calcularCompensacionPendiente, validarCompensaciones, ESTADOS_CUENTAN_ACUMULADO } from '../lib/plantillaCarga'
 import { ESTADO_COLORS as ESTADO_COLORS_ESTIMACION, ESTADO_LABELS as ESTADO_LABELS_ESTIMACION } from '../lib/estadosEstimacion'
+import { calcularTotalesEstimacion, folioEstimacion, camposMontosEstimacion, filasLineas } from '../lib/totalesEstimacion'
 
 const ESTADOS_ESTIMACION_NO_CUENTAN = ['cancelada', 'rechazada', 'rechazada_auditoria']
 const MESES_ES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre']
@@ -115,6 +116,10 @@ export default function EstimacionesContrato() {
   const [fechaFinEjec, setFechaFinEjec] = useState('')
   const [errorFechas, setErrorFechas] = useState(null)
   const [datosAmort, setDatosAmort] = useState(null)
+  const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [reemplazo, setReemplazo] = useState(null) // estimación en_correccion que se reemplaza; null = modo crear
+  const periodoModal = reemplazo ? reemplazo.periodos : periodoElegido
 
   const fetchDatos = useCallback(async () => {
     try {
@@ -210,10 +215,28 @@ export default function EstimacionesContrato() {
     return (data?.[0]?.numero_estimacion ?? 0) + 1
   }
 
-  async function handleAbrirModal() {
+  async function abrirModalReemplazo(estimacionId) {
     setError(null)
+    const { data: est, error: e } = await supabase
+      .from('estimaciones')
+      .select('id, numero_estimacion, estado, fecha_inicio_ejecucion, fecha_fin_ejecucion, periodos(id, label, fecha_inicio, fecha_fin)')
+      .eq('id', estimacionId).eq('contrato_id', id).maybeSingle()
+    if (e) { setError(e.message); return }
+    if (!est || est.estado !== 'en_correccion' || !est.periodos) {
+      setError('Esta estimación ya no está en corrección.')
+      return
+    }
+    await abrirModal(est)
+  }
+
+  function handleAbrirModal() { return abrirModal(null) }
+
+  async function abrirModal(est) {
+    setError(null)
+    const periodo = est ? est.periodos : periodoElegido
     try {
-      if (await periodoTieneEstimacion(periodoElegido.id)) {
+      // En reemplazo el periodo ya es de esta misma estimación
+      if (!est && await periodoTieneEstimacion(periodo.id)) {
         setError('Este periodo ya tiene una estimación. Se actualizó la lista.')
         await fetchDatos()
         return
@@ -223,6 +246,7 @@ export default function EstimacionesContrato() {
       return
     }
 
+    setReemplazo(est)
     setDatosAmort(null)
     setShowModal(true)
     setModalPaso(1)
@@ -232,13 +256,13 @@ export default function EstimacionesContrato() {
     setErrorCrear(null)
     setErrorFechas(null)
     setCreadoOk(false)
-    setFechaInicioEjec(periodoElegido?.fecha_inicio || '')
-    setFechaFinEjec(periodoElegido?.fecha_fin || '')
+    setFechaInicioEjec(est?.fecha_inicio_ejecucion || periodo?.fecha_inicio || '')
+    setFechaFinEjec(est?.fecha_fin_ejecucion || periodo?.fecha_fin || '')
     setCargandoModal(true)
     try {
       const [{ catalogo: cat, acumulado }, datos] = await Promise.all([
         cargarCatalogoYAcumulado(),
-        cargarDatosAmortizacion(supabase, id),
+        cargarDatosAmortizacion(supabase, id, { excluirEstimacionIds: est ? [est.id] : [] }),
       ])
       setConceptos(ordenarPorJerarquia(cat.filter(c => c.tipo === 'CO')))
       setAcumuladoMap(Object.fromEntries(Object.entries(acumulado).map(([k, v]) => [k, v.cantidad])))
@@ -251,6 +275,17 @@ export default function EstimacionesContrato() {
     }
   }
 
+  // ?reemplazar=<id>: abre el modal en modo reemplazar una vez cargado el contrato
+  const reemplazarId = searchParams.get('reemplazar')
+  useEffect(() => {
+    if (!reemplazarId || loading || !contrato) return
+    const t = setTimeout(() => {
+      setSearchParams({}, { replace: true })
+      abrirModalReemplazo(reemplazarId)
+    }, 0)
+    return () => clearTimeout(t)
+  }, [reemplazarId, loading, contrato]) // eslint-disable-line react-hooks/exhaustive-deps
+
   async function validarFechas() {
     if (!fechaInicioEjec || !fechaFinEjec) {
       setErrorFechas('Las fechas de ejecución son obligatorias.')
@@ -261,12 +296,14 @@ export default function EstimacionesContrato() {
       return false
     }
 
-    const { data: anteriores } = await supabase
+    let qAnteriores = supabase
       .from('estimaciones')
       .select('folio, fecha_inicio_ejecucion, fecha_fin_ejecucion, numero_estimacion')
       .eq('contrato_id', id)
       .not('fecha_inicio_ejecucion', 'is', null)
       .not('estado', 'in', '("cancelada","rechazada","rechazada_auditoria")')
+    if (reemplazo) qAnteriores = qAnteriores.neq('id', reemplazo.id)
+    const { data: anteriores } = await qAnteriores
 
     const traslape = anteriores?.find(e => {
       const ini = e.fecha_inicio_ejecucion
@@ -291,19 +328,21 @@ export default function EstimacionesContrato() {
 
   function handleCerrarModal() {
     setShowModal(false)
+    if (reemplazo && creadoOk) navigate(`/contrato/${id}/estimacion/${reemplazo.id}`)
+    setReemplazo(null)
   }
 
   async function handleDescargarPlantilla() {
     setDescargando(true)
     try {
       const { catalogo: cat, acumulado } = await cargarCatalogoYAcumulado() // fresco al descargar
-      const numeroEstimacion = await siguienteNumeroEstimacion()
+      const numeroEstimacion = reemplazo ? reemplazo.numero_estimacion : await siguienteNumeroEstimacion()
       const contratoMeta = { ...contrato, id }
       const wb = await construirLibroPlantilla({
         conceptos: cat.map(claveVisible), acumulado,
-        contrato: contratoMeta, periodo: periodoElegido, numeroEstimacion,
+        contrato: contratoMeta, periodo: periodoModal, numeroEstimacion,
       })
-      await descargarPlantillaCarga(wb, { contrato: contratoMeta, periodo: periodoElegido })
+      await descargarPlantillaCarga(wb, { contrato: contratoMeta, periodo: periodoModal })
     } catch (e) {
       setError('Error al generar la plantilla: ' + e.message)
     } finally {
@@ -370,7 +409,7 @@ export default function EstimacionesContrato() {
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `Plantilla_Estimacion_${contrato?.numero}_${periodoElegido?.label}.xlsx`
+      a.download = `Plantilla_Estimacion_${contrato?.numero}_${periodoModal?.label}.xlsx`
       document.body.appendChild(a)
       a.click()
       document.body.removeChild(a)
@@ -390,7 +429,7 @@ export default function EstimacionesContrato() {
         if (esPlantillaNueva(wb)) {
           // Revalida contra la base al subir: catálogo y acumulado actuales
           const { catalogo: cat, acumulado } = await cargarCatalogoYAcumulado()
-          const r = leerPlantillaCarga(wb, { contratoId: id, periodoId: periodoElegido?.id, conceptos: cat.map(claveVisible), acumulado })
+          const r = leerPlantillaCarga(wb, { contratoId: id, periodoId: periodoModal?.id, conceptos: cat.map(claveVisible), acumulado })
           setAvisosCarga(r.avisos)
           setUploadErrors(r.errores)
           setLineasValidadas(r.errores.length === 0 ? r.lineas.map(completarLinea) : [])
@@ -490,7 +529,7 @@ export default function EstimacionesContrato() {
     e.target.value = ''
   }
 
-  async function handleCrearEstimacion() {
+  async function handleGuardarEstimacion() {
     setCreando(true)
     setErrorCrear(null)
     if (!datosAmort) {
@@ -499,7 +538,7 @@ export default function EstimacionesContrato() {
       return
     }
     try {
-      if (await periodoTieneEstimacion(periodoElegido.id)) {
+      if (!reemplazo && await periodoTieneEstimacion(periodoModal.id)) {
         setErrorCrear('Este periodo ya tiene una estimación. Cierra el modal y vuelve a intentar.')
         await fetchDatos()
         return
@@ -514,70 +553,85 @@ export default function EstimacionesContrato() {
         return
       }
 
-      const numeroEst = await siguienteNumeroEstimacion()
-      const hash = Math.random().toString(36).substring(2, 10).toUpperCase()
-      const folio = `EST-${contrato.numero}-${String(numeroEst).padStart(3, '0')}-${hash}`
+      // Reemplazo: conserva el numero_estimacion de la fila original y genera folio nuevo
+      const numeroEst = reemplazo ? reemplazo.numero_estimacion : await siguienteNumeroEstimacion()
+      const folio = folioEstimacion(contrato.numero, numeroEst)
+      const t = calcularTotalesEstimacion({ lineas: lineasValidadas, contrato, datosAmort })
 
-      const valorEstimacion = lineasValidadas.reduce((sum, l) => sum + (l.importe_periodo || 0), 0)
-
-      const { data: prevEsts, error: prevError } = await supabase
+      let qPrev = supabase
         .from('estimaciones')
         .select('subtotal')
         .eq('contrato_id', id)
         .in('estado', ['borrador', ...ESTADOS_CUENTAN_ACUMULADO])
+      if (reemplazo) qPrev = qPrev.neq('id', reemplazo.id)
+      const { data: prevEsts, error: prevError } = await qPrev
       if (prevError) throw prevError
       const sumaPrevia = (prevEsts || []).reduce((sum, e) => sum + (e.subtotal || 0), 0)
-      if (sumaPrevia + valorEstimacion > (contrato?.monto_vigente ?? contrato?.monto_original ?? 0)) {
+      if (sumaPrevia + t.valorEstimacion > (contrato?.monto_vigente ?? contrato?.monto_original ?? 0)) {
         setErrorCrear('El monto supera el saldo disponible del contrato')
         return
       }
 
-      const fondoGarantia = valorEstimacion * ((contrato?.pct_fondo_garantia || 0) / 100)
-      const { amortizacion } = calcAmortizacion({ valorEstimacion, contrato, ...datosAmort })
-      const subtotalNeto = round2(valorEstimacion - amortizacion - fondoGarantia)
-      const iva = round2(subtotalNeto * (contrato?.tasa_iva ?? 0.16))
-      const totalNeto = round2(subtotalNeto + iva)
+      if (!reemplazo) {
+        const { data: est, error: estError } = await supabase
+          .from('estimaciones')
+          .insert([{
+            periodo_id: periodoModal.id,
+            contrato_id: id,
+            folio,
+            numero_estimacion: numeroEst,
+            estado: 'borrador',
+            ...camposMontosEstimacion(t),
+            fecha_inicio_ejecucion: fechaInicioEjec,
+            fecha_fin_ejecucion: fechaFinEjec,
+          }])
+          .select()
+          .maybeSingle()
+        if (estError) throw estError
+        if (!est) throw new Error('No se pudo confirmar la creación de la estimación.')
 
-      const { data: est, error: estError } = await supabase
-        .from('estimaciones')
-        .insert([{
-          periodo_id: periodoElegido.id,
-          contrato_id: id,
-          folio,
-          numero_estimacion: numeroEst,
-          estado: 'borrador',
-          subtotal: valorEstimacion,
-          iva,
-          fondo_garantia: fondoGarantia,
-          amortizacion_anticipo: amortizacion,
-          total_neto: totalNeto,
-          fecha_inicio_ejecucion: fechaInicioEjec,
-          fecha_fin_ejecucion: fechaFinEjec,
-        }])
-        .select()
-        .maybeSingle()
-      if (estError) throw estError
-      if (!est) throw new Error('No se pudo confirmar la creación de la estimación.')
+        const { error: linError } = await supabase
+          .from('estimacion_lineas')
+          .insert(filasLineas(est.id, lineasValidadas))
+        if (linError) throw linError
+      } else {
+        // Orden seguro: 1) ids de las líneas anteriores, 2) insertar las nuevas, 3) actualizar el encabezado,
+        // 4) borrar las anteriores. Si algo falla a medias no se pierde la captura previa.
+        const { data: viejas, error: viejasError } = await supabase
+          .from('estimacion_lineas').select('id').eq('estimacion_id', reemplazo.id)
+        if (viejasError) throw viejasError
 
-      const { error: linError } = await supabase
-        .from('estimacion_lineas')
-        .insert(lineasValidadas.map(l => ({
-          estimacion_id: est.id,
-          concepto_id: l.concepto_id,
-          clave: l.clave,
-          descripcion: l.descripcion,
-          unidad: l.unidad,
-          cantidad_contratada: l.cantidad_contratada,
-          cantidad_acumulada_anterior: l.cantidad_acumulada_anterior,
-          cantidad_periodo: l.cantidad_periodo,
-          cantidad_acumulada_total: l.cantidad_acumulada_total,
-          pu_contratado: l.pu_contratado,
-          pu_cobrado: l.pu_cobrado,
-          importe_periodo: l.importe_periodo,
-          validacion_pu: l.validacion_pu,
-          validacion_volumen: l.validacion_volumen,
-        })))
-      if (linError) throw linError
+        const { data: nuevas, error: linError } = await supabase
+          .from('estimacion_lineas').insert(filasLineas(reemplazo.id, lineasValidadas)).select('id')
+        if (linError) throw linError
+
+        // Solo si sigue en_correccion (un UPDATE sin efecto por RLS no da error: devuelve vacío)
+        const { data: upd, error: updError } = await supabase
+          .from('estimaciones')
+          .update({
+            folio,
+            estado: 'en_revision',
+            ...camposMontosEstimacion(t),
+            fecha_inicio_ejecucion: fechaInicioEjec,
+            fecha_fin_ejecucion: fechaFinEjec,
+          })
+          .eq('id', reemplazo.id).eq('estado', 'en_correccion')
+          .select('id').maybeSingle()
+        if (updError || !upd) {
+          await supabase.from('estimacion_lineas').delete().in('id', (nuevas || []).map(n => n.id)) // deshacer
+          if (updError) throw updError
+          throw new Error('La estimación ya no está en corrección; no se aplicó el cambio.')
+        }
+
+        // Verifica cuántas se borraron: RLS no avisa con error
+        if (viejas?.length) {
+          const { data: borradas, error: delError } = await supabase
+            .from('estimacion_lineas').delete().in('id', viejas.map(v => v.id)).select('id')
+          if (delError || (borradas || []).length !== viejas.length) {
+            throw new Error('La estimación se envió a revisión, pero no se pudieron eliminar las líneas anteriores. Avisa a Generación Industrial antes de volver a intentar.' + (delError ? ` (${delError.message})` : ''))
+          }
+        }
+      }
 
       setCreadoOk(true)
       await fetchDatos()
@@ -596,14 +650,15 @@ export default function EstimacionesContrato() {
     .reduce((acc, e) => acc + (e.total_neto || 0), 0)
   const pendiente = totalEstimado - totalPagado
 
-  const montoTotalArchivo = lineasValidadas.reduce((sum, l) => sum + (l.importe_periodo || 0), 0)
-  const fondoGarantiaArchivo = montoTotalArchivo * ((contrato?.pct_fondo_garantia || 0) / 100)
-  const calcArchivo = datosAmort ? calcAmortizacion({ valorEstimacion: montoTotalArchivo, contrato, ...datosAmort }) : null
-  const amortizacionArchivo = calcArchivo?.amortizacion ?? 0
-  const subtotalArchivo = round2(montoTotalArchivo - amortizacionArchivo - fondoGarantiaArchivo)
+  const tArchivo = calcularTotalesEstimacion({ lineas: lineasValidadas, contrato, datosAmort })
+  const montoTotalArchivo = tArchivo.valorEstimacion
+  const fondoGarantiaArchivo = tArchivo.fondoGarantia
+  const calcArchivo = tArchivo.calc
+  const amortizacionArchivo = tArchivo.amortizacion
+  const subtotalArchivo = tArchivo.subtotalNeto
   const tasaIva = contrato?.tasa_iva ?? 0.16
-  const ivaArchivo = round2(subtotalArchivo * tasaIva)
-  const totalNetoArchivo = round2(subtotalArchivo + ivaArchivo)
+  const ivaArchivo = tArchivo.iva
+  const totalNetoArchivo = tArchivo.totalNeto
 
   return (
     <div>
@@ -710,7 +765,7 @@ export default function EstimacionesContrato() {
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl w-full max-w-2xl shadow-xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-              <h3 className="font-semibold text-gray-900">Nueva estimación</h3>
+              <h3 className="font-semibold text-gray-900">{reemplazo ? `Corregir estimación #${reemplazo.numero_estimacion}` : 'Nueva estimación'}</h3>
               <button onClick={handleCerrarModal} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
             </div>
 
@@ -732,8 +787,8 @@ export default function EstimacionesContrato() {
                     <>
                       <div className="bg-gray-50 border border-gray-100 rounded-lg px-4 py-3">
                         <p className="text-xs text-gray-500">Periodo de presentación</p>
-                        <p className="text-sm font-medium text-gray-900">{periodoElegido?.label}</p>
-                        <p className="text-xs text-gray-500">{formatFecha(periodoElegido?.fecha_inicio)} — {formatFecha(periodoElegido?.fecha_fin)}</p>
+                        <p className="text-sm font-medium text-gray-900">{periodoModal?.label}</p>
+                        <p className="text-xs text-gray-500">{formatFecha(periodoModal?.fecha_inicio)} — {formatFecha(periodoModal?.fecha_fin)}</p>
                       </div>
 
                       <div className="grid grid-cols-2 gap-3">
@@ -785,7 +840,7 @@ export default function EstimacionesContrato() {
                     <>
                       {creadoOk ? (
                         <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm rounded-lg px-4 py-3">
-                          Estimación creada como borrador correctamente.
+                          {reemplazo ? 'Estimación corregida y enviada a revisión.' : 'Estimación creada como borrador correctamente.'}
                         </div>
                       ) : (
                         <>
@@ -903,9 +958,9 @@ export default function EstimacionesContrato() {
                   </button>
                 )}
                 {modalPaso === 2 && !creadoOk && uploadErrors.length === 0 && lineasValidadas.length > 0 && (
-                  <button onClick={handleCrearEstimacion} disabled={creando}
+                  <button onClick={handleGuardarEstimacion} disabled={creando}
                     className="px-4 py-2 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-40">
-                    {creando ? 'Creando...' : 'Crear estimación'}
+                    {creando ? (reemplazo ? 'Enviando...' : 'Creando...') : (reemplazo ? 'Enviar corrección' : 'Crear estimación')}
                   </button>
                 )}
               </div>

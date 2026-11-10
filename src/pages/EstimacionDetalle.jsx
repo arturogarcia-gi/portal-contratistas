@@ -212,7 +212,11 @@ export default function EstimacionDetalle() {
       {estimacion.estado === 'en_correccion' && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6">
           <p className="text-sm font-medium text-amber-800">↩ Estimación devuelta para corrección</p>
-          <p className="text-xs text-amber-700 mt-1">El folio fue invalidado. Contacta a Generación Industrial para conocer los siguientes pasos.</p>
+          <p className="text-xs text-amber-700 mt-1">El folio fue invalidado. Descarga la plantilla, corrige las cantidades y sube el Excel corregido: la estimación volverá a revisión con un folio nuevo.</p>
+          <Link to={`/contrato/${id}/estimaciones?reemplazar=${estimacionId}`}
+            className="inline-block mt-3 px-4 py-2 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">
+            ⬆ Subir Excel corregido
+          </Link>
         </div>
       )}
 
