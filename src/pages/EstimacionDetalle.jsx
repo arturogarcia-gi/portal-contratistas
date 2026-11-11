@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import { cargarDatosAmortizacion, calcAmortizacion } from '../lib/amortizacionAnticipo'
 import { ESTADO_COLORS, ESTADO_LABELS } from '../lib/estadosEstimacion'
 import { diasDesde } from '../lib/format'
+import { registrarEventoDocumento } from '../lib/eventosDocumento'
 
 function formatMXN(n) {
   return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 2 }).format(n || 0)
@@ -100,6 +101,13 @@ export default function EstimacionDetalle() {
         .update({ estado: 'en_revision' })
         .eq('id', estimacionId)
       if (updError) throw updError
+      await registrarEventoDocumento(supabase, {
+        documento_tipo: 'estimacion',
+        documento_id: estimacionId,
+        estado_anterior: 'borrador',
+        estado_nuevo: 'en_revision',
+        comentario: 'Enviada a revisión',
+      })
       navigate(`/contrato/${id}/estimaciones`)
     } catch (e) {
       setError(e.message)

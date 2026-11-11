@@ -6,6 +6,7 @@ import { cargarDatosAmortizacion } from '../lib/amortizacionAnticipo'
 import { construirLibroPlantilla, descargarPlantillaCarga, cargarAcumuladoConceptos, esPlantillaNueva, leerPlantillaCarga, calcularCompensacionPendiente, validarCompensaciones, ESTADOS_CUENTAN_ACUMULADO } from '../lib/plantillaCarga'
 import { ESTADO_COLORS as ESTADO_COLORS_ESTIMACION, ESTADO_LABELS as ESTADO_LABELS_ESTIMACION } from '../lib/estadosEstimacion'
 import { calcularTotalesEstimacion, folioEstimacion, camposMontosEstimacion, filasLineas } from '../lib/totalesEstimacion'
+import { registrarEventoDocumento } from '../lib/eventosDocumento'
 
 const ESTADOS_ESTIMACION_NO_CUENTAN = ['cancelada', 'rechazada', 'rechazada_auditoria']
 const MESES_ES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre']
@@ -590,6 +591,14 @@ export default function EstimacionesContrato() {
         if (estError) throw estError
         if (!est) throw new Error('No se pudo confirmar la creación de la estimación.')
 
+        await registrarEventoDocumento(supabase, {
+          documento_tipo: 'estimacion',
+          documento_id: est.id,
+          estado_anterior: null,
+          estado_nuevo: 'borrador',
+          comentario: 'Estimación creada',
+        })
+
         const { error: linError } = await supabase
           .from('estimacion_lineas')
           .insert(filasLineas(est.id, lineasValidadas))
@@ -622,6 +631,14 @@ export default function EstimacionesContrato() {
           if (updError) throw updError
           throw new Error('La estimación ya no está en corrección; no se aplicó el cambio.')
         }
+
+        await registrarEventoDocumento(supabase, {
+          documento_tipo: 'estimacion',
+          documento_id: reemplazo.id,
+          estado_anterior: 'en_correccion',
+          estado_nuevo: 'en_revision',
+          comentario: 'Estimación corregida y reenviada a revisión',
+        })
 
         // Verifica cuántas se borraron: RLS no avisa con error
         if (viejas?.length) {
