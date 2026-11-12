@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabase'
 import { getPuestosActivos, getNombreFirmante, getLabelPuesto, SPV_FIRMANTE_COLUMNS } from '../lib/firmantes'
 import { cargarDatosAmortizacion, calcAmortizacion } from '../lib/amortizacionAnticipo'
 import { nombreArchivo } from '../lib/nombresArchivo'
+import { etiquetaIva } from '../lib/iva'
 import { useTituloDocumento } from '../hooks/useTituloDocumento'
 
 function formatMXN(n) {
@@ -101,7 +102,6 @@ export default function CaratulaEstimacion() {
   const subtotal = valorEstimacion - amortizacion - fondoGarantia
   const iva = estimacion.iva
   const totalNeto = estimacion.total_neto
-  const tasaIva = contrato?.tasa_iva ?? 0.16
   const etiquetaAmort = modoAmort === 'proporcional' && valorEstimacion > 0
     ? `Amortización anticipo ${(amortizacion / valorEstimacion * 100).toFixed(1)}%`
     : Math.abs(amortizacion - (estimacion.subtotal * (contrato?.pct_anticipo || 0) / 100)) > 0.01 ? 'Amortización anticipo (especial)' : `Amortización anticipo ${contrato?.pct_anticipo}%`
@@ -204,7 +204,7 @@ export default function CaratulaEstimacion() {
               [etiquetaAmort, `−${formatMXN(amortizacion)}`],
               [`Fondo de garantía ${contrato?.pct_fondo_garantia}%`, `−${formatMXN(fondoGarantia)}`],
               ['Subtotal', formatMXN(subtotal)],
-              [`IVA ${(tasaIva * 100).toFixed(0)}%`, formatMXN(iva)],
+              [etiquetaIva(contrato), formatMXN(iva)],
             ].map(([label, valor]) => (
               <div key={label} className="flex justify-between px-3 py-1.5">
                 <span className="text-sm text-gray-600">{label}</span>

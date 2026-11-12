@@ -7,14 +7,13 @@ import { construirLibroPlantilla, descargarPlantillaCarga, cargarAcumuladoConcep
 import { ESTADO_COLORS as ESTADO_COLORS_ESTIMACION, ESTADO_LABELS as ESTADO_LABELS_ESTIMACION } from '../lib/estadosEstimacion'
 import { calcularTotalesEstimacion, folioEstimacion, camposMontosEstimacion, filasLineas } from '../lib/totalesEstimacion'
 import { registrarEventoDocumento } from '../lib/eventosDocumento'
+import { etiquetaIva } from '../lib/iva'
+import { siguienteNumeroEstimacion } from '../lib/numeracionEstimacion'
+import { round2 } from '../lib/format'
+import { fechaLocalISO } from '../lib/estatusContrato'
 
 const ESTADOS_ESTIMACION_NO_CUENTAN = ['cancelada', 'rechazada', 'rechazada_auditoria']
 const MESES_ES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre']
-
-function hoyLocal() {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
 
 function fechaLargaEs(f) {
   const [y, m, d] = f.split('-')
@@ -22,7 +21,7 @@ function fechaLargaEs(f) {
 }
 
 function mensajeSinPeriodo(contrato, proximoPeriodo) {
-  if (contrato?.fecha_fin && contrato.fecha_fin < hoyLocal()) {
+  if (contrato?.fecha_fin && contrato.fecha_fin < fechaLocalISO()) {
     return 'Este contrato ya venció y no genera periodos nuevos. Para presentar una estimación, contacta a GI MTY para recibir indicaciones.'
   }
   if (proximoPeriodo) {
@@ -41,14 +40,8 @@ function formatFecha(f) {
   return fecha.toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
-const round2 = (n) => Math.round(n * 100) / 100
-
 const ESTADO_COLORS = { ...ESTADO_COLORS_ESTIMACION, pendiente: 'bg-amber-50 text-amber-700', borrador: 'bg-amber-100 text-amber-800' }
 const ESTADO_LABELS = { ...ESTADO_LABELS_ESTIMACION, pendiente: 'Pendiente' }
-
-function estadoEfectivo(estimacion) {
-  return estimacion.fecha_pago ? 'pagada' : estimacion.estado
-}
 
 function ordenarPorJerarquia(lista) {
   return [...lista].sort((a, b) => {
@@ -159,10 +152,10 @@ export default function EstimacionesContrato() {
 
       // Solo sin periodo elegible y contrato vigente: el próximo periodo (cualquier estado)
       let proximo = null
-      if (!periodo && !(contratoData.fecha_fin && contratoData.fecha_fin < hoyLocal())) {
+      if (!periodo && !(contratoData.fecha_fin && contratoData.fecha_fin < fechaLocalISO())) {
         const { data: prox, error: proxError } = await supabase
           .from('periodos').select('fecha_inicio')
-          .eq('contrato_id', id).gt('fecha_inicio', hoyLocal())
+          .eq('contrato_id', id).gt('fecha_inicio', fechaLocalISO())
           .order('fecha_inicio', { ascending: true }).limit(1)
         if (proxError) throw proxError
         proximo = prox?.[0]?.fecha_inicio ?? null
@@ -204,16 +197,14 @@ export default function EstimacionesContrato() {
     return { catalogo: cp || [], acumulado }
   }
 
-  async function siguienteNumeroEstimacion() {
+  // Máximo + 1 entre las que consumen número (lib/numeracionEstimacion.js, ADR-0005 de la app)
+  async function cargarSiguienteNumero() {
     const { data, error: e } = await supabase
       .from('estimaciones')
-      .select('numero_estimacion')
+      .select('numero_estimacion, estado')
       .eq('contrato_id', id)
-      .not('estado', 'eq', 'cancelada')
-      .order('numero_estimacion', { ascending: false })
-      .limit(1)
     if (e) throw e
-    return (data?.[0]?.numero_estimacion ?? 0) + 1
+    return siguienteNumeroEstimacion(data)
   }
 
   async function abrirModalReemplazo(estimacionId) {
@@ -304,7 +295,11 @@ export default function EstimacionesContrato() {
       .not('fecha_inicio_ejecucion', 'is', null)
       .not('estado', 'in', '("cancelada","rechazada","rechazada_auditoria")')
     if (reemplazo) qAnteriores = qAnteriores.neq('id', reemplazo.id)
-    const { data: anteriores } = await qAnteriores
+    const { data: anteriores, error: anterioresError } = await qAnteriores
+    if (anterioresError) {
+      setErrorFechas('No se pudo validar el traslape de fechas: ' + anterioresError.message)
+      return false
+    }
 
     const traslape = anteriores?.find(e => {
       const ini = e.fecha_inicio_ejecucion
@@ -337,7 +332,7 @@ export default function EstimacionesContrato() {
     setDescargando(true)
     try {
       const { catalogo: cat, acumulado } = await cargarCatalogoYAcumulado() // fresco al descargar
-      const numeroEstimacion = reemplazo ? reemplazo.numero_estimacion : await siguienteNumeroEstimacion()
+      const numeroEstimacion = reemplazo ? reemplazo.numero_estimacion : await cargarSiguienteNumero()
       const contratoMeta = { ...contrato, id }
       const wb = await construirLibroPlantilla({
         conceptos: cat.map(claveVisible), acumulado,
@@ -555,7 +550,7 @@ export default function EstimacionesContrato() {
       }
 
       // Reemplazo: conserva el numero_estimacion de la fila original y genera folio nuevo
-      const numeroEst = reemplazo ? reemplazo.numero_estimacion : await siguienteNumeroEstimacion()
+      const numeroEst = reemplazo ? reemplazo.numero_estimacion : await cargarSiguienteNumero()
       const folio = folioEstimacion(contrato.numero, numeroEst)
       const t = calcularTotalesEstimacion({ lineas: lineasValidadas, contrato, datosAmort })
 
@@ -588,7 +583,10 @@ export default function EstimacionesContrato() {
           }])
           .select()
           .maybeSingle()
-        if (estError) throw estError
+        if (estError) {
+          if (estError.code === '23505') throw new Error('Otra estimación tomó ese número al mismo tiempo. Intenta guardar de nuevo.')
+          throw estError
+        }
         if (!est) throw new Error('No se pudo confirmar la creación de la estimación.')
 
         await registrarEventoDocumento(supabase, {
@@ -627,9 +625,16 @@ export default function EstimacionesContrato() {
           .eq('id', reemplazo.id).eq('estado', 'en_correccion')
           .select('id').maybeSingle()
         if (updError || !upd) {
-          await supabase.from('estimacion_lineas').delete().in('id', (nuevas || []).map(n => n.id)) // deshacer
-          if (updError) throw updError
-          throw new Error('La estimación ya no está en corrección; no se aplicó el cambio.')
+          // Deshacer las líneas nuevas; el DELETE tampoco avisa por RLS, se verifica el conteo
+          const idsNuevas = (nuevas || []).map(n => n.id)
+          const { data: deshechas, error: undoError } = await supabase
+            .from('estimacion_lineas').delete().in('id', idsNuevas).select('id')
+          const fallaDeshacer = undoError || (deshechas || []).length !== idsNuevas.length
+          const aviso = fallaDeshacer
+            ? ' Además no se pudieron quitar las líneas nuevas; avisa a Generación Industrial antes de volver a intentar.' + (undoError ? ` (${undoError.message})` : '')
+            : ''
+          if (updError) throw new Error(updError.message + aviso)
+          throw new Error('La estimación ya no está en corrección; no se aplicó el cambio.' + aviso)
         }
 
         await registrarEventoDocumento(supabase, {
@@ -663,7 +668,7 @@ export default function EstimacionesContrato() {
 
   const totalEstimado = estimaciones.reduce((acc, e) => acc + (e.total_neto || 0), 0)
   const totalPagado = estimaciones
-    .filter(e => estadoEfectivo(e) === 'pagada')
+    .filter(e => e.estado === 'pagada')
     .reduce((acc, e) => acc + (e.total_neto || 0), 0)
   const pendiente = totalEstimado - totalPagado
 
@@ -673,7 +678,6 @@ export default function EstimacionesContrato() {
   const calcArchivo = tArchivo.calc
   const amortizacionArchivo = tArchivo.amortizacion
   const subtotalArchivo = tArchivo.subtotalNeto
-  const tasaIva = contrato?.tasa_iva ?? 0.16
   const ivaArchivo = tArchivo.iva
   const totalNetoArchivo = tArchivo.totalNeto
 
@@ -748,7 +752,7 @@ export default function EstimacionesContrato() {
               <tr><td colSpan={6} className="text-center py-8 text-gray-400">No hay estimaciones registradas.</td></tr>
             )}
             {estimaciones.map(e => {
-              const estado = estadoEfectivo(e)
+              const estado = e.estado
               return (
                 <tr key={e.id} className="hover:bg-gray-50">
                   <td className="px-4 py-3 font-medium text-gray-900">{e.numero_estimacion}</td>
@@ -935,7 +939,7 @@ export default function EstimacionesContrato() {
                                     <span className="text-sm font-semibold text-gray-900">{formatMXN(subtotalArchivo)}</span>
                                   </div>
                                   <div className="flex justify-between items-center py-1 border-b border-gray-50">
-                                    <span className="text-xs text-gray-500">IVA {(tasaIva * 100).toFixed(0)}%</span>
+                                    <span className="text-xs text-gray-500">{etiquetaIva(contrato)}</span>
                                     <span className="text-sm font-medium text-gray-700">{formatMXN(ivaArchivo)}</span>
                                   </div>
                                   <div className="flex justify-between items-center pt-1">

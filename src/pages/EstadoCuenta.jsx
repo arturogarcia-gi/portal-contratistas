@@ -5,8 +5,11 @@ import { ESTADO_COLORS as ESTADO_COLORS_ESTIMACION, ESTADO_LABELS as ESTADO_LABE
 import { getPuestosActivos, getNombreFirmante, getLabelPuesto } from '../lib/firmantes'
 import { nombreArchivo } from '../lib/nombresArchivo'
 import { useTituloDocumento } from '../hooks/useTituloDocumento'
-import { calcResumenAnticipoFondo } from '../lib/amortizacionAnticipo'
-import { formatMXNFijo, diasEntreISO } from '../lib/format'
+import { ESTADOS_ANTICIPO_VIGENTE } from '../lib/amortizacionAnticipo'
+import { calcTotalEstimadoBruto, calcTotalPagadoSinIva, calcSaldoPorPagar, calcAmortizado, calcSaldoPorAmortizar, calcFondoRetenido } from '../lib/saldoContrato'
+import { calcIva } from '../lib/iva'
+import { formatMXNFijo } from '../lib/format'
+import { diasEntreISO } from '../lib/estatusContrato'
 
 function formatMXN(n) {
   return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 }).format(n || 0)
@@ -39,7 +42,7 @@ export default function EstadoCuenta() {
         supabase.from('estimaciones')
           .select('id, numero_estimacion, subtotal, iva, fondo_garantia, amortizacion_anticipo, estado, numero_factura, fecha_factura, fecha_fin_ejecucion, fecha_pago, created_at')
           .eq('contrato_id', id)
-          .not('estado', 'in', '(cancelada,rechazada,rechazada_auditoria)')
+          .neq('estado', 'cancelada')
           .order('numero_estimacion', { ascending: true }),
         supabase.from('anticipos')
           .select('id, folio, monto, estado, numero_factura, fecha_autorizacion, fecha_pago, created_at')
@@ -83,8 +86,6 @@ export default function EstadoCuenta() {
   if (error) return <div className="text-center py-12 text-red-500 text-sm">{error}</div>
   if (!contrato) return <div className="text-center py-12 text-gray-400 text-sm">Contrato no encontrado.</div>
 
-  const tasaIva = contrato.tasa_iva ?? 0.16
-
   const todasFilas = [
     ...estimaciones.map(e => ({
       tipo: 'Estimación',
@@ -106,7 +107,7 @@ export default function EstadoCuenta() {
       monto_estimado: a.monto || 0,
       amort_anticipo: 0,
       retencion_fondo: 0,
-      iva: (a.monto || 0) * tasaIva,
+      iva: calcIva(a.monto || 0, contrato),
       estado: a.estado || 'pendiente',
       fecha: a.fecha_autorizacion || a.created_at,
       fecha_pago: a.fecha_pago || null,
@@ -119,7 +120,7 @@ export default function EstadoCuenta() {
       monto_estimado: f.monto || 0,
       amort_anticipo: 0,
       retencion_fondo: 0,
-      iva: (f.monto || 0) * tasaIva,
+      iva: calcIva(f.monto || 0, contrato),
       estado: f.estado || 'pendiente',
       fecha: f.fecha_autorizacion || f.created_at,
       fecha_pago: f.fecha_pago || null,
@@ -151,19 +152,22 @@ export default function EstadoCuenta() {
   const totalNeto = totalSubtotal + totalIVA
 
   const montoVigente = contrato.monto_vigente || 0
-  const totalEstimadoBruto = estimaciones.reduce((s, e) => s + (e.subtotal || 0), 0)
-  const totalPagadoSinIVA = estimaciones
-    .filter(e => e.fecha_pago)
-    .reduce((s, e) => s + (e.subtotal || 0) - (e.amortizacion_anticipo || 0) - (e.fondo_garantia || 0), 0)
-    + anticipos.filter(a => a.estado === 'pagado').reduce((s, a) => s + (a.monto || 0), 0)
-    + fondos.filter(f => f.estado === 'pagado').reduce((s, f) => s + (f.monto || 0), 0)
+  // Cifras financieras: solo con saldoContrato.js (misma fuente que la app; docs/03-paridad-con-la-app.md)
+  const totalEstimadoBruto = calcTotalEstimadoBruto(estimaciones)
+  const totalPagadoSinIVA = calcTotalPagadoSinIva(estimaciones, anticipos, fondos)
   const saldoPorEstimar = montoVigente - totalEstimadoBruto
-  const saldoPorPagar = montoVigente - totalPagadoSinIVA
+  const saldoPorPagar = calcSaldoPorPagar(contrato, estimaciones, anticipos, fondos)
 
-  const { saldoAnticipoPorAmortizar, fondoRetenidoNeto } =
-    calcResumenAnticipoFondo({ estimaciones, anticipos, fondos })
+  const montoAnticipoVigente = anticipos
+    .filter(a => ESTADOS_ANTICIPO_VIGENTE.includes(a.estado))
+    .reduce((s, a) => s + (Number(a.monto) || 0), 0)
+  const saldoAnticipoPorAmortizar = calcSaldoPorAmortizar({
+    montoAnticipoVigente,
+    amortizado: calcAmortizado({ estimaciones }),
+  })
+  const fondoRetenidoNeto = calcFondoRetenido({ estimaciones, fondosGarantia: fondos })
 
-  const diasOC = diasEntreISO(contrato.fecha_fin_original, contrato.fecha_fin)
+  const diasOC = contrato.fecha_fin_original && contrato.fecha_fin ? diasEntreISO(contrato.fecha_fin_original, contrato.fecha_fin) : null
   const textoDiasOC = !diasOC ? '—' : `${diasOC > 0 ? '+' : '−'}${Math.abs(diasOC)} días`
 
   const nombreSpv = (contrato.spvs?.razon_social || '').replace(/\s*(S\.\s?A\.|A\.C\.|S\.C\.).*$/i, '').trim() || 'Generación Industrial Monterrey'

@@ -1,5 +1,6 @@
 import { calcAmortizacion } from './amortizacionAnticipo.js'
 import { round2 } from './format.js'
+import { calcIva } from './iva.js'
 
 // Totales de una estimación a partir de sus líneas (misma fórmula que usaba la creación).
 export function calcularTotalesEstimacion({ lineas, contrato, datosAmort }) {
@@ -8,7 +9,7 @@ export function calcularTotalesEstimacion({ lineas, contrato, datosAmort }) {
   const calc = datosAmort ? calcAmortizacion({ valorEstimacion, contrato, ...datosAmort }) : null
   const amortizacion = calc?.amortizacion ?? 0
   const subtotalNeto = round2(valorEstimacion - amortizacion - fondoGarantia)
-  const iva = round2(subtotalNeto * (contrato?.tasa_iva ?? 0.16))
+  const iva = calcIva(subtotalNeto, contrato)
   const totalNeto = round2(subtotalNeto + iva)
   return { valorEstimacion, fondoGarantia, calc, amortizacion, subtotalNeto, iva, totalNeto }
 }

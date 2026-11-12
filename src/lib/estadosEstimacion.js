@@ -25,3 +25,6 @@ export const ESTADO_LABELS = {
   pagada: 'Pagada',
   cancelada: 'Cancelada',
 }
+
+// Estimaciones en alguna de las dos revisiones (Revisión 1 y Revisión 2).
+export const ESTADOS_REVISION = ['en_revision', 'en_revision_auditoria']

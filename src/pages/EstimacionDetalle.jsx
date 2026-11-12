@@ -3,8 +3,9 @@ import { useParams, useNavigate, Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { cargarDatosAmortizacion, calcAmortizacion } from '../lib/amortizacionAnticipo'
 import { ESTADO_COLORS, ESTADO_LABELS } from '../lib/estadosEstimacion'
-import { diasDesde } from '../lib/format'
+import { diasDesde } from '../lib/fechas'
 import { registrarEventoDocumento } from '../lib/eventosDocumento'
+import { etiquetaIva } from '../lib/iva'
 
 function formatMXN(n) {
   return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 2 }).format(n || 0)
@@ -68,15 +69,18 @@ export default function EstimacionDetalle() {
       setConceptos(cats || [])
 
       if (est.estado === 'cancelada') {
-        const { data: ev } = await supabase
-          .from('aprobacion_eventos')
+        // Dato informativo: si falla no bloquea la pantalla, pero se deja constancia.
+        const { data: ev, error: evError } = await supabase
+          .from('eventos_documento')
           .select('comentario, usuario_nombre')
-          .eq('estimacion_id', estimacionId)
-          .eq('paso', 'cancelada')
+          .eq('documento_tipo', 'estimacion')
+          .eq('documento_id', estimacionId)
+          .eq('estado_nuevo', 'cancelada')
           .order('created_at', { ascending: false })
           .limit(1)
           .maybeSingle()
-        setEventoCancelacion(ev)
+        if (evError) console.error('Error al consultar el evento de cancelación:', evError)
+        setEventoCancelacion(evError ? null : ev)
       } else {
         setEventoCancelacion(null)
       }
@@ -120,11 +124,24 @@ export default function EstimacionDetalle() {
     if (!window.confirm('¿Cancelar esta estimación? Esta acción no se puede deshacer.')) return
     setCambiandoEstado(true)
     try {
-      const { error: updError } = await supabase
+      // Solo si sigue en el estado que se está viendo; RLS no avisa con error cuando el UPDATE no afecta filas.
+      const { data: cancelada, error: updError } = await supabase
         .from('estimaciones')
         .update({ estado: 'cancelada' })
         .eq('id', estimacionId)
+        .eq('estado', estimacion.estado)
+        .select('id')
       if (updError) throw updError
+      if (!cancelada || cancelada.length === 0) {
+        throw new Error('No se pudo cancelar: la estimación cambió de estado. Recarga la página.')
+      }
+      await registrarEventoDocumento(supabase, {
+        documento_tipo: 'estimacion',
+        documento_id: estimacionId,
+        estado_anterior: estimacion.estado,
+        estado_nuevo: 'cancelada',
+        comentario: 'Cancelada por el contratista',
+      })
       navigate(`/contrato/${id}/estimaciones`)
     } catch (e) {
       setError(e.message)
@@ -143,7 +160,6 @@ export default function EstimacionDetalle() {
   const subtotal = valorEstimacion - amortizacion - fondoGarantia
   const iva = estimacion.iva
   const totalNeto = estimacion.total_neto
-  const tasaIva = contrato?.tasa_iva ?? 0.16
   const etiquetaAmort = modoAmort === 'proporcional' && valorEstimacion > 0
     ? `Amortización ${(amortizacion / valorEstimacion * 100).toFixed(1)}%`
     : `Amortización ${contrato?.pct_anticipo}%`
@@ -302,7 +318,7 @@ export default function EstimacionDetalle() {
           <p className="text-lg font-semibold text-gray-900">{formatMXN(subtotal)}</p>
         </div>
         <div className="bg-white rounded-xl border border-gray-200 p-4">
-          <p className="text-xs text-gray-500 mb-1">IVA {(tasaIva * 100).toFixed(0)}%</p>
+          <p className="text-xs text-gray-500 mb-1">{etiquetaIva(contrato)}</p>
           <p className="text-lg font-semibold text-gray-700">{formatMXN(iva)}</p>
         </div>
         <div className="bg-white rounded-xl border border-gray-200 p-4">
@@ -330,7 +346,7 @@ export default function EstimacionDetalle() {
               <span className="text-xs font-semibold text-gray-900">{formatMXN(subtotal)}</span>
             </div>
             <div className="flex justify-between py-1 border-b border-gray-50">
-              <span className="text-xs text-gray-500">IVA {(tasaIva * 100).toFixed(0)}%</span>
+              <span className="text-xs text-gray-500">{etiquetaIva(contrato)}</span>
               <span className="text-xs font-medium text-gray-700">{formatMXN(iva)}</span>
             </div>
             <div className="flex justify-between pt-2">

@@ -47,32 +47,37 @@ export default function RelacionEstimacion() {
       }
       setEstimacion(est)
 
-      const { data: cats } = await supabase
+      const { data: cats, error: catsError } = await supabase
         .from('conceptos')
         .select('id, clave, descripcion, unidad, tipo, jerarquia, orden, cantidad_contratada, precio_unitario')
         .eq('contrato_id', id)
         .order('orden', { ascending: true })
+      if (catsError) throw catsError
       setConceptos(cats || [])
 
-      const { data: lins } = await supabase
+      const { data: lins, error: linsError } = await supabase
         .from('estimacion_lineas')
         .select('concepto_id, clave, cantidad_periodo, importe_periodo, pu_cobrado')
         .eq('estimacion_id', estimacionId)
+      if (linsError) throw linsError
       setLineasEsta(lins || [])
 
-      const { data: anteriores } = await supabase
+      const { data: anteriores, error: anterioresError } = await supabase
         .from('estimaciones')
         .select('id')
         .eq('contrato_id', id)
         .in('estado', ESTADOS_CUENTAN_ACUMULADO)
         .lt('numero_estimacion', est.numero_estimacion)
 
+      if (anterioresError) throw anterioresError
+
       const mapaAcum = {}
       if (anteriores && anteriores.length > 0) {
-        const { data: linPrev } = await supabase
+        const { data: linPrev, error: linPrevError } = await supabase
           .from('estimacion_lineas')
           .select('concepto_id, cantidad_periodo, importe_periodo')
           .in('estimacion_id', anteriores.map(e => e.id))
+        if (linPrevError) throw linPrevError
         ;(linPrev || []).forEach(l => {
           if (!l.concepto_id) return
           if (!mapaAcum[l.concepto_id]) mapaAcum[l.concepto_id] = { cantidad: 0, importe: 0 }
@@ -82,16 +87,11 @@ export default function RelacionEstimacion() {
       }
       setAcumAnterior(mapaAcum)
 
-      const { data: oc } = await supabase
-        .from('convenios')
-        .select('numero')
-        .eq('contrato_id', id)
-        .eq('estado', 'autorizado')
-        .or('tipo.is.null,tipo.neq.anticipo')
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle()
-      setOcVigente(oc)
+      // convenios no tiene política para contratistas: el número de la OC vigente sale de una RPC (SECURITY DEFINER)
+      const { data: oc, error: ocError } = await supabase
+        .rpc('oc_vigente_contratista', { p_contrato_id: id })
+      if (ocError) throw ocError
+      setOcVigente(oc ?? null)
 
       const { data: fConf, error: fConfError } = await supabase
         .from('contrato_firmantes')
@@ -119,7 +119,18 @@ export default function RelacionEstimacion() {
   useTituloDocumento(estimacion && nombreArchivo({ prefijo: 'Estimacion', numero: estimacion.numero_estimacion, contrato: estimacion.contratos?.numero }))
 
   if (loading) return <div className="text-center py-12 text-gray-400 text-sm">Cargando relación de estimación...</div>
-  if (!estimacion) return <div className="text-center py-12 text-gray-400 text-sm">{error || 'Estimación no encontrada.'}</div>
+  if (error) {
+    return (
+      <div className="max-w-md mx-auto mt-12 text-center">
+        <div className="bg-red-50 border border-red-200 rounded-xl p-5">
+          <p className="text-sm font-medium text-red-800">No se pudo cargar la relación de estimación</p>
+          <p className="text-xs text-red-700 mt-1">{error}</p>
+          <p className="text-xs text-red-700 mt-1">No se muestra ni se exporta una relación incompleta. Recarga la página para intentar de nuevo.</p>
+        </div>
+      </div>
+    )
+  }
+  if (!estimacion) return <div className="text-center py-12 text-gray-400 text-sm">Estimación no encontrada.</div>
 
   const contrato = estimacion.contratos
   const contratista = contrato?.contratistas
@@ -144,7 +155,7 @@ export default function RelacionEstimacion() {
           proyecto: `${contrato?.spvs?.nombre_corto} · ${contrato?.spvs?.nombre_proyecto}`,
         },
         periodo: { inicio: estimacion.fecha_inicio_ejecucion, fin: estimacion.fecha_fin_ejecucion },
-        oc: ocVigente?.numero || 'Sin convenios',
+        oc: ocVigente || 'Sin convenios',
         filas, totales, firmas,
       })
     } catch (e) {
@@ -208,7 +219,7 @@ export default function RelacionEstimacion() {
             </div>
             <div>
               <p className="text-xs text-gray-500 uppercase tracking-wide">OC vigente</p>
-              <p className="text-sm font-semibold text-gray-900">{ocVigente?.numero || 'Sin convenios'}</p>
+              <p className="text-sm font-semibold text-gray-900">{ocVigente || 'Sin convenios'}</p>
             </div>
           </div>
           <div>

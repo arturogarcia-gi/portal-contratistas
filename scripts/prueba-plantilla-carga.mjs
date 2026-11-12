@@ -215,7 +215,8 @@ const claves = r => r.lineas.map(l => l.clave)
 
 // ============ C) Regla de saldo: mismos estados que la carga/descarga anteriores ============
 {
-  check('estados que cuentan para el acumulado (igual que NuevaEstimacion.jsx:101 y :213 y el portal)', ESTADOS_CUENTAN_ACUMULADO, ['en_revision', 'autorizada', 'correo_enviado', 'con_factura', 'pagada'])
+  // en_revision_auditoria (Revisión 2) cuenta a propósito (ADR-0002): evita estimar dos veces lo mismo mientras se revisa.
+  check('estados que cuentan para el acumulado (igual que NuevaEstimacion.jsx:101 y :213 y el portal)', ESTADOS_CUENTAN_ACUMULADO, ['en_revision', 'en_revision_auditoria', 'autorizada', 'correo_enviado', 'con_factura', 'pagada'])
   const consultas = []
   const falso = {
     from: tabla => {
